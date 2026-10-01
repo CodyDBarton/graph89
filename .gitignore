@@ -56,3 +56,9 @@ release/
 
 # NDK
 .cxx
+
+# Personal calculator firmware and Apple build products
+/TI89Titanium_OS.89u
+/ios/build/
+xcuserdata/
+*.xcuserstate

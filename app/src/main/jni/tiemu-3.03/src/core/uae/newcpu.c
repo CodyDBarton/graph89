@@ -24,6 +24,8 @@
 #include "tilibs.h"
 #include "ti68k_def.h"
 #include "bkpts.h"
+#include "romcalls.h"
+#include "handles.h"
 #define write_log printf
 static const struct uae_prefs currprefs = {0, 1, 1};
 #if defined(CYGNUS_SIM) && !defined(NO_GDB)

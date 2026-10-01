@@ -35,7 +35,9 @@
  Linkport management (D-bus serial input/output)
  */
 
+#ifndef __APPLE__
 #include <jni.h>
+#endif
 #include <stdlib.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -59,7 +61,9 @@
 CableHandle* cable_handle = NULL;
 CalcHandle* calc_handle = NULL;
 
+#ifndef __APPLE__
 JNIEnv * DbusJNIenv = NULL;
+#endif
 
 /*
  Linkport (lp) / directfile (df) / void (vd) mappers
@@ -688,6 +692,7 @@ int recfile(void) {
 		strcat(dst_fn, tifiles_fext_of_group(linkp.calc_model));
 	}
 
+#ifndef __APPLE__
 	if (DbusJNIenv != NULL )
 	{
 		jstring jSrc = (*DbusJNIenv)->NewStringUTF(DbusJNIenv, src_fn);
@@ -701,6 +706,7 @@ int recfile(void) {
 		(*DbusJNIenv)->CallStaticIntMethod(DbusJNIenv, class, method, jSrc, jDst);
 	}
 
+#endif
 	recfile_end: rip = 0;
 
 	return 0;

@@ -28,3 +28,8 @@ Graph89 consists of 4 distinct parts.
 
 4. 	Graph89 Android. This is the UI layer running in the Android OS. 
 	Graph89 is licensed with a GPL V3 license.
+
+## Personal iOS port
+
+A TI-89 Titanium prototype for iPhone and iPad is available under [ios](ios/README.md).
+It uses the bundled native engine and requires your own local Titanium OS file.
