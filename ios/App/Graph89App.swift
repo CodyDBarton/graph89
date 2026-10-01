@@ -261,6 +261,22 @@ final class CalculatorKeyboard: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func draw(_ rect: CGRect) {
         image?.draw(in: bounds)
+        if let context = UIGraphicsGetCurrentContext() {
+            context.saveGState()
+            context.scaleBy(x: bounds.width / 635, y: bounds.height / 1014)
+            UIColor(white: 0.40, alpha: 1).setFill()
+            UIBezierPath(roundedRect: CGRect(x: 43, y: 891, width: 86, height: 43), cornerRadius: 10).fill()
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            ("ON" as NSString).draw(in: CGRect(x: 43, y: 896, width: 86, height: 36), withAttributes: [
+                .font: UIFont.systemFont(ofSize: 27, weight: .bold), .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph])
+            ("OFF" as NSString).draw(in: CGRect(x: 43, y: 851, width: 86, height: 27), withAttributes: [
+                .font: UIFont.systemFont(ofSize: 18, weight: .bold),
+                .foregroundColor: UIColor(red: 0.35, green: 0.79, blue: 1, alpha: 1),
+                .paragraphStyle: paragraph])
+            context.restoreGState()
+        }
         let active = Set(fingers.values)
         UIColor.systemCyan.withAlphaComponent(0.28).setFill()
         for key in keys where active.contains(key.code) {

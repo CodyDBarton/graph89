@@ -18,6 +18,7 @@ It does not yet reproduce Graph89's complete Android feature set or other calcul
 The OS file is bundled into the application and converted to an emulator image on startup.
 State is saved in the app's Application Support directory when the app enters the background.
 Returning to the app resumes the saved calculator session and wakes the display.
+The power key is labeled ON with blue OFF above it; 2ND + ON turns the calculator off.
 Tapping a key wakes a sleeping calculator. Uninstalling the app removes its state.
 A free Personal Team's device provisioning expires after seven days; reinstall from Xcode to renew it.
 Keep the bundled firmware and generated builds local.
