@@ -6,6 +6,9 @@ extern "C" {
 #endif
 int graph89_start(const char *os_path, const char *image_path);
 void graph89_run(int instructions);
+int graph89_batch_size(int cpu_percent);
+int graph89_is_busy(void);
+int graph89_type_text(const char *text);
 void graph89_key(int key, int pressed);
 int graph89_screen_is_on(void);
 void graph89_wake(void);

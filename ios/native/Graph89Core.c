@@ -5,6 +5,7 @@
 #include "m68k.h"
 #include "kbd.h"
 #include "state.h"
+#include "engine.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -21,6 +22,16 @@ int graph89_start(const char *os_path, const char *image_path) {
     return ti68k_reset();
 }
 void graph89_run(int instructions) { hw_m68k_run(instructions); }
+int graph89_batch_size(int cpu_percent) {
+    if (cpu_percent < 30) cpu_percent = 30;
+    if (cpu_percent > 250) cpu_percent = 250;
+    return (engine_num_cycles_per_loop() * cpu_percent / 100) / 4;
+}
+int graph89_is_busy(void) {
+    // Same bottom-right LCD pixel used by the Android TiEmu wrapper.
+    return tihw.on_off && (tihw.ram[tihw.lcd_adr + 99 * 30 + 19] & 1);
+}
+int graph89_type_text(const char *text) { return ti68k_kbd_push_chars(text); }
 void graph89_key(int key, int pressed) { ti68k_kbd_set_key(key, pressed); }
 int graph89_screen_is_on(void) { return tihw.on_off != 0; }
 void graph89_wake(void) {

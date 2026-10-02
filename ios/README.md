@@ -23,6 +23,37 @@ Tapping a key wakes a sleeping calculator. Uninstalling the app removes its stat
 A free Personal Team's device provisioning expires after seven days; reinstall from Xcode to renew it.
 Keep the bundled firmware and generated builds local.
 
+## Configuration Settings
+
+Tap the gear beside the calculator title. CPU Speed ranges from 30% to 250%;
+Overclock when Busy runs extra work while the calculator shows BUSY. Changes apply
+immediately and are saved independently of calculator state. Restore Defaults sets
+100% CPU Speed and enables busy overclocking, matching Android's defaults.
+
+The iOS port now uses Android's model-specific engine batch size (90,000 CPU-loop
+iterations for this Titanium at 100%) and pause calculation: truncate(30 / speed)
+milliseconds after each normal batch, with the batch itself multiplied by speed.
+Here speed is the selected percentage divided by 100. This preserves the original
+slider's nonlinear behavior; 200% is not a promise of exactly twice the throughput.
+100% follows Android's pacing, not a new calibration against physical hardware.
+
+Screen refresh remains at a target 30 Hz, independently of engine scheduling.
+Busy overclocking uses the same bottom-right LCD indicator as Android. While it
+is active, a dedicated serial background queue runs the native engine continuously,
+without pacing sleeps or a limit on additional batches. This uses the throughput
+of one CPU core; the sequential emulated processor cannot distribute a calculation
+across cores. OS scheduling and thermal limits still apply. The normal CPU Speed
+slider governs paced operation; busy overclocking runs at maximum throughput
+regardless of its value.
+
+The worker returns to its queue approximately every 10 ms to handle keys, settings,
+lifecycle changes and framebuffer snapshots, then immediately continues computing.
+Each native call runs 10,000 CPU-loop iterations, so a single call can overrun that
+quantum on slower hardware. All native access stays on this queue because TiEmu
+has global mutable state. UIKit runs on the main thread. Turbo is suppressed while
+a key is held to avoid accelerated key repetition. Minimum key-hold time scales
+with the normal speed setting so short taps can still be scanned at 30%.
+
 ## Native checks on a Mac
 
 From the repository root:
@@ -53,7 +84,10 @@ Use the `--smoke-test` launch argument only for development; it enters `1+1` and
 The Graph89 scheme includes a UI test. In Xcode, choose Product → Test to run it
 on the selected simulator. It starts with a sleeping calculator, taps the actual
 keyboard coordinates to wake it and enter `2+3`, and compares the displayed result
-with a reference generated independently by the native emulator. The test uses
+with a reference generated independently by the native emulator. Additional checks
+verify saved settings, actual engine throughput at 30/100/250%, busy overclocking
+using `nInt(sin(x^2),x,0,8)`, sustained maximum throughput and ON interruption
+using the longer limit of 100, and access to settings in landscape. The test uses
 a separate saved session so it does not overwrite your calculator session.
 
 ## Implementation notes
@@ -63,7 +97,7 @@ a separate saved session so it does not overwrite your calculator session.
   avoiding changes to Android's existing configuration. All current Apple builds use arm64.
 - JNI callbacks are excluded on Apple, and Android logging has an Apple compatibility path.
 - `native/Graph89Core.c` exposes startup, input, framebuffer, and saved-state operations to Swift.
-- `App/Graph89App.swift` owns the emulator on the main thread, runs at 30 frames per second,
+- `App/Graph89App.swift` owns the emulator on a serial background queue, refreshes the screen at 30 frames per second,
   supports simultaneous touch input, and maps keys with the existing skin's bitmap mask.
 - `tools/create_project.py` regenerates the checked-in project. If you edit project settings in
   Xcode, do not regenerate it unless you also update the generator.
