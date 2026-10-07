@@ -426,16 +426,39 @@ final class CalculatorKeyboard: UIView {
         if let context = UIGraphicsGetCurrentContext() {
             context.saveGState()
             context.scaleBy(x: bounds.width / 635, y: bounds.height / 1014)
-            UIColor(white: 0.40, alpha: 1).setFill()
-            UIBezierPath(roundedRect: CGRect(x: 43, y: 891, width: 86, height: 43), cornerRadius: 10).fill()
+            // Replace the EMU lettering on the key face, following its photographed
+            // contour rather than placing a rectangular label over the skin.
+            let face = UIBezierPath()
+            face.move(to: CGPoint(x: 43, y: 878))
+            face.addCurve(to: CGPoint(x: 113, y: 882), controlPoint1: CGPoint(x: 55, y: 874), controlPoint2: CGPoint(x: 92, y: 877))
+            face.addCurve(to: CGPoint(x: 122, y: 895), controlPoint1: CGPoint(x: 120, y: 883), controlPoint2: CGPoint(x: 123, y: 887))
+            face.addLine(to: CGPoint(x: 122, y: 932))
+            face.addCurve(to: CGPoint(x: 105, y: 950), controlPoint1: CGPoint(x: 123, y: 944), controlPoint2: CGPoint(x: 117, y: 950))
+            face.addCurve(to: CGPoint(x: 43, y: 907), controlPoint1: CGPoint(x: 80, y: 950), controlPoint2: CGPoint(x: 51, y: 932))
+            face.addCurve(to: CGPoint(x: 43, y: 878), controlPoint1: CGPoint(x: 37, y: 893), controlPoint2: CGPoint(x: 37, y: 883))
+            face.close()
+            context.saveGState()
+            face.addClip()
+            let colors = [UIColor(white: 0.34, alpha: 1).cgColor,
+                          UIColor(white: 0.40, alpha: 1).cgColor,
+                          UIColor(white: 0.46, alpha: 1).cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.55, 1]) {
+                context.drawLinearGradient(gradient, start: CGPoint(x: 83, y: 877),
+                                           end: CGPoint(x: 83, y: 950), options: [])
+            }
+            context.restoreGState()
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
-            ("ON" as NSString).draw(in: CGRect(x: 43, y: 896, width: 86, height: 36), withAttributes: [
-                .font: UIFont.systemFont(ofSize: 27, weight: .bold), .foregroundColor: UIColor.white,
+            let keyFont = UIFont(name: "HelveticaNeue-CondensedBold", size: 24)
+                ?? UIFont.systemFont(ofSize: 24, weight: .bold)
+            ("ON" as NSString).draw(in: CGRect(x: 49, y: 895, width: 70, height: 32), withAttributes: [
+                .font: keyFont, .foregroundColor: UIColor(white: 0.97, alpha: 1),
                 .paragraphStyle: paragraph])
-            ("OFF" as NSString).draw(in: CGRect(x: 43, y: 851, width: 86, height: 27), withAttributes: [
-                .font: UIFont.systemFont(ofSize: 18, weight: .bold),
-                .foregroundColor: UIColor(red: 0.35, green: 0.79, blue: 1, alpha: 1),
+            let alternateFont = UIFont(name: "HelveticaNeue-CondensedBold", size: 18)
+                ?? UIFont.systemFont(ofSize: 18, weight: .bold)
+            ("OFF" as NSString).draw(in: CGRect(x: 61, y: 851, width: 62, height: 25), withAttributes: [
+                .font: alternateFont,
+                .foregroundColor: UIColor(red: 0.65, green: 0.84, blue: 0.90, alpha: 1),
                 .paragraphStyle: paragraph])
             context.restoreGState()
         }
