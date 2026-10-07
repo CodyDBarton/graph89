@@ -35,12 +35,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 }
 
 final class CalculatorController: UIViewController {
-    private let titleLabel = UILabel()
-    private let settingsButton = UIButton(type: .system)
+    private let settingsButton = CornerSettingsButton(frame: .zero)
     private let settings = CalculatorSettings()
     private let engine = CalculatorEngine()
     private var framePending = false
-    private let statusLabel = UILabel()
+    private let engineMonitor = UILabel()
     private let lcd = UIImageView()
     private let lcdBezel = UIView()
     private let keyboard = CalculatorKeyboard()
@@ -55,14 +54,7 @@ final class CalculatorController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 0.08, green: 0.09, blue: 0.10, alpha: 1)
-        titleLabel.text = "Graph 89 · Titanium"
-        titleLabel.font = .systemFont(ofSize: 19, weight: .semibold)
-        titleLabel.textColor = .white
-        titleLabel.textAlignment = .center
-        statusLabel.text = "Starting calculator…"
-        statusLabel.font = .systemFont(ofSize: 12)
-        statusLabel.textColor = .lightGray
-        statusLabel.textAlignment = .center
+        view.clipsToBounds = true
         lcd.backgroundColor = UIColor(white: 210.0 / 255, alpha: 1)
         lcd.contentMode = .scaleToFill
         lcd.layer.magnificationFilter = .nearest
@@ -71,44 +63,65 @@ final class CalculatorController: UIViewController {
         lcdBezel.addSubview(lcd)
         lcd.isAccessibilityElement = true
         lcd.accessibilityLabel = "Calculator display"
-        settingsButton.setImage(UIImage(systemName: "gearshape"), for: .normal)
-        settingsButton.tintColor = .white
         settingsButton.accessibilityLabel = "Configuration Settings"
         settingsButton.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
-        statusLabel.accessibilityIdentifier = "Engine status"
-        for child in [titleLabel, statusLabel, lcdBezel, keyboard, settingsButton] { view.addSubview(child) }
+        for child in [lcdBezel, keyboard, settingsButton] { view.addSubview(child) }
+        if ProcessInfo.processInfo.arguments.contains("--ui-test") {
+            // Expose engine diagnostics only to the UI test runner, without visible text.
+            engineMonitor.isAccessibilityElement = true
+            engineMonitor.accessibilityIdentifier = "Engine status"
+            engineMonitor.accessibilityLabel = "Engine status"
+            engineMonitor.textColor = .clear
+            view.addSubview(engineMonitor)
+        }
+        keyboard.accessibilityIdentifier = "Calculator button face"
         keyboard.onKey = { [weak self] key, pressed in
             self?.setKey(key, pressed: pressed)
         }
         DispatchQueue.main.async { [weak self] in self?.start() }
     }
 
+    override var prefersStatusBarHidden: Bool { true }
+    override var prefersHomeIndicatorAutoHidden: Bool { true }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let area = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 14, dy: 8)
-        titleLabel.frame = CGRect(x: area.minX + 44, y: area.minY, width: max(1, area.width - 88), height: 28)
-        titleLabel.adjustsFontSizeToFitWidth = true
-        settingsButton.frame = CGRect(x: area.maxX - 44, y: area.minY - 8, width: 44, height: 44)
-        statusLabel.frame = CGRect(x: area.minX, y: area.maxY - 22, width: area.width, height: 22)
-        let availableHeight = max(1, area.height - 70)
-        if area.width > area.height {
-            let width = min((area.width - 28) / 2, availableHeight / (1014.0 / 635))
-            let total = width * 2 + 28
-            let x = area.midX - total / 2
-            lcdBezel.frame = CGRect(x: x, y: area.midY - width * 0.625 / 2, width: width, height: (width - 12) * 0.625 + 12)
-            keyboard.frame = CGRect(x: x + width + 28, y: area.minY + 40, width: width, height: width * 1014 / 635)
-        } else {
-            let width = min(area.width, 560, (availableHeight - 16.5) / (0.625 + 1014.0 / 635))
-            let x = area.midX - width / 2
-            lcdBezel.frame = CGRect(x: x, y: area.minY + 40, width: width, height: (width - 12) * 0.625 + 12)
-            keyboard.frame = CGRect(x: x, y: lcdBezel.frame.maxY + 12, width: width, height: width * 1014 / 635)
-        }
-        lcd.frame = lcdBezel.bounds.insetBy(dx: 6, dy: 6)
+        let area = view.bounds
+        let safeArea = area.inset(by: view.safeAreaInsets)
+        let panel = settings.stretchMode.panelFrame(in: area, safeArea: safeArea)
+        let screenFraction: CGFloat = (635 * 100 / 160.0) / (1014 + 635 * 100 / 160.0)
+        lcdBezel.frame = CGRect(x: panel.minX, y: panel.minY, width: panel.width,
+                               height: panel.height * screenFraction)
+        lcd.frame = lcdBezel.bounds
+        keyboard.frame = CGRect(x: panel.minX, y: lcdBezel.frame.maxY, width: panel.width,
+                                height: panel.height - lcdBezel.frame.height)
+        // Nest the badge against the physical corner, independently of the
+        // panel and safe-area rectangle. Insets provide a conservative estimate of
+        // corner curvature; the visible badge is also the complete touch target.
+        let insets = view.safeAreaInsets
+        let cornerRadius = max(insets.top, insets.bottom, insets.left, insets.right)
+        let buttonRadius = CornerSettingsButton.diameter / 2
+        let cornerOffset = max(buttonRadius + 3, cornerRadius - (cornerRadius - buttonRadius) / sqrt(2))
+        // On iPad, mouse clicks in the top strip can be intercepted before the
+        // app receives them, even with the status bar hidden. Keep the entire
+        // visible badge below that strip. Touch target and artwork share a center.
+        let topOffset = traitCollection.userInterfaceIdiom == .pad
+            ? max(cornerOffset, max(20, insets.top) + buttonRadius) : cornerOffset
+        settingsButton.frame = CGRect(x: area.maxX - cornerOffset - buttonRadius,
+                                      y: area.minY + topOffset - buttonRadius,
+                                      width: CornerSettingsButton.diameter, height: CornerSettingsButton.diameter)
+        engineMonitor.frame = CGRect(x: area.minX, y: area.minY, width: 1, height: 1)
+    }
+
+    private func showError(_ message: String) {
+        let alert = UIAlertController(title: "Graph89", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        (presentedViewController ?? self).present(alert, animated: true)
     }
 
     private func start() {
         guard let os = Bundle.main.url(forResource: "TI89Titanium_OS", withExtension: "89u") else {
-            statusLabel.text = "Titanium OS file is missing from this build."
+            showError("Titanium OS file is missing from this build.")
             return
         }
         do {
@@ -123,7 +136,7 @@ final class CalculatorController: UIViewController {
                          benchmark: arguments.contains("--ui-test") && arguments.contains("--ui-test-benchmark")) { [weak self] error in
                 guard let self else { return }
                 guard error == 0 else {
-                    self.statusLabel.text = "Calculator startup failed (\(error))."
+                    self.showError("Calculator startup failed (\(error)).")
                     return
                 }
                 self.ready = true
@@ -138,7 +151,7 @@ final class CalculatorController: UIViewController {
                 if arguments.contains("--smoke-test") { self.runSmokeTest() }
             }
         } catch {
-            statusLabel.text = "Unable to prepare calculator storage."
+            showError("Unable to prepare calculator storage.")
         }
     }
 
@@ -170,6 +183,7 @@ final class CalculatorController: UIViewController {
         controller.onChange = { [weak self] in
             guard let self else { return }
             self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock)
+            self.view.setNeedsLayout()
         }
         let navigation = UINavigationController(rootViewController: controller)
         navigation.modalPresentationStyle = .formSheet
@@ -184,9 +198,8 @@ final class CalculatorController: UIViewController {
             self.framePending = false
             guard self.running else { return }
             self.refreshScreen(frame.pixels)
-            self.statusLabel.text = frame.on ? "OS 3.10 · TI-89 Titanium" : "Calculator asleep · Tap a key to wake"
             if ProcessInfo.processInfo.arguments.contains("--ui-test") {
-                self.statusLabel.accessibilityValue = "\(frame.normalIterations),\(frame.turboIterations),\(frame.busy ? 1 : 0)"
+                self.engineMonitor.accessibilityValue = "\(frame.normalIterations),\(frame.turboIterations),\(frame.busy ? 1 : 0)"
             }
         }
     }
@@ -224,10 +237,10 @@ final class CalculatorController: UIViewController {
         let temporary = stateURL.appendingPathExtension("tmp")
         if engine.save(to: temporary.path) == 0 {
             if Darwin.rename(temporary.path, stateURL.path) != 0 {
-                statusLabel.text = "Unable to save this session."
+                showError("Unable to save this session.")
             }
         } else {
-            statusLabel.text = "Unable to save this session."
+            showError("Unable to save this session.")
         }
     }
 
@@ -484,6 +497,86 @@ final class CalculatorKeyAccessibility: UIAccessibilityElement {
 }
 
 
+final class CornerSettingsButton: UIButton {
+    static let diameter: CGFloat = 44
+    private let badge = UIView()
+    private let glyph = UIImageView(image: UIImage(systemName: "gearshape", withConfiguration:
+        UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)))
+    var badgeCenter: CGPoint { CGPoint(x: bounds.midX, y: bounds.midY) }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        badge.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        badge.layer.cornerRadius = Self.diameter / 2
+        badge.isUserInteractionEnabled = false
+        glyph.tintColor = .white
+        glyph.contentMode = .scaleAspectFit
+        glyph.isUserInteractionEnabled = false
+        addSubview(badge)
+        addSubview(glyph)
+        alpha = 0.5
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let radius = bounds.width / 2
+        let dx = point.x - bounds.midX
+        let dy = point.y - bounds.midY
+        return dx * dx + dy * dy <= radius * radius
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        badge.frame = bounds
+        badge.layer.cornerRadius = bounds.width / 2
+        glyph.bounds = CGRect(origin: .zero, size: glyph.image?.size ?? CGSize(width: 11, height: 11))
+        glyph.center = badgeCenter
+    }
+}
+
+enum StretchMode: String, CaseIterable {
+    case safeAspect, horizontal, vertical, both, fullAspect, cropAspect
+
+    var title: String {
+        switch self {
+        case .safeAspect: return "Aspect ratio; no loss"
+        case .horizontal: return "Horizontal"
+        case .vertical: return "Vertical"
+        case .both: return "Horizontal and vertical"
+        case .fullAspect: return "Aspect ratio, full"
+        case .cropAspect: return "Aspect ratio, crop"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .safeAspect: return "Default. Keeps the entire calculator visible within the safe display area, without stretching."
+        case .horizontal: return "Starts from no loss and stretches to the left and right display edges. Rounded corners may hide content."
+        case .vertical: return "Starts from no loss and stretches to the top and bottom display edges. Rounded corners may hide content."
+        case .both: return "Stretches to all display edges. Rounded corners may hide content."
+        case .fullAspect: return "Keeps proportions and fills one display dimension, ignoring rounded corners. Bars may remain."
+        case .cropAspect: return "Keeps proportions and fills both display dimensions. Anything beyond the display is cropped."
+        }
+    }
+    func panelFrame(in bounds: CGRect, safeArea: CGRect) -> CGRect {
+        let original = CGSize(width: 635, height: 1014 + 635 * 100 / 160.0)
+        func fit(_ area: CGRect, crop: Bool = false) -> CGRect {
+            let xScale = area.width / original.width
+            let yScale = area.height / original.height
+            let scale = crop ? max(xScale, yScale) : min(xScale, yScale)
+            let size = CGSize(width: original.width * scale, height: original.height * scale)
+            return CGRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2,
+                          width: size.width, height: size.height)
+        }
+        let noLoss = fit(safeArea)
+        switch self {
+        case .safeAspect: return noLoss
+        case .horizontal: return CGRect(x: bounds.minX, y: noLoss.minY, width: bounds.width, height: noLoss.height)
+        case .vertical: return CGRect(x: noLoss.minX, y: bounds.minY, width: noLoss.width, height: bounds.height)
+        case .both: return bounds
+        case .fullAspect: return fit(bounds)
+        case .cropAspect: return fit(bounds, crop: true)
+        }
+    }
+}
+
 final class CalculatorSettings {
     private let defaults: UserDefaults
     var cpuPercent: Int {
@@ -491,6 +584,9 @@ final class CalculatorSettings {
     }
     var overclock: Bool {
         didSet { defaults.set(overclock, forKey: "overclockWhenBusy") }
+    }
+    var stretchMode: StretchMode {
+        didSet { defaults.set(stretchMode.rawValue, forKey: "stretchMode") }
     }
     init() {
         let testing = ProcessInfo.processInfo.arguments.contains("--ui-test")
@@ -501,6 +597,7 @@ final class CalculatorSettings {
         defaults.register(defaults: ["cpuPercent": 100, "overclockWhenBusy": true])
         cpuPercent = min(250, max(30, defaults.integer(forKey: "cpuPercent")))
         overclock = defaults.bool(forKey: "overclockWhenBusy")
+        stretchMode = StretchMode(rawValue: defaults.string(forKey: "stretchMode") ?? "") ?? .safeAspect
     }
 }
 
@@ -510,6 +607,8 @@ final class ConfigurationController: UIViewController {
     private let slider = UISlider()
     private let valueLabel = UILabel()
     private let turboSwitch = UISwitch()
+    private let stretchButton = UIButton(type: .system)
+    private let stretchDetail = UILabel()
 
     init(settings: CalculatorSettings) {
         self.settings = settings
@@ -580,6 +679,21 @@ final class ConfigurationController: UIViewController {
         detail.textColor = .secondaryLabel
         detail.numberOfLines = 0
         stack.addArrangedSubview(detail)
+        let stretchLabel = UILabel()
+        stretchLabel.text = "Stretch mode"
+        stretchLabel.font = .preferredFont(forTextStyle: .headline)
+        stack.addArrangedSubview(stretchLabel)
+        stretchButton.accessibilityLabel = "Stretch mode"
+        stretchButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        stretchButton.titleLabel?.numberOfLines = 0
+        stretchButton.contentHorizontalAlignment = .leading
+        stretchButton.showsMenuAsPrimaryAction = true
+        stretchButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        stack.addArrangedSubview(stretchButton)
+        stretchDetail.font = .preferredFont(forTextStyle: .subheadline)
+        stretchDetail.textColor = .secondaryLabel
+        stretchDetail.numberOfLines = 0
+        stack.addArrangedSubview(stretchDetail)
         let reset = UIButton(type: .system)
         reset.setTitle("Restore Defaults", for: .normal)
         reset.addTarget(self, action: #selector(restoreDefaults), for: .touchUpInside)
@@ -591,6 +705,17 @@ final class ConfigurationController: UIViewController {
         slider.accessibilityValue = "\(settings.cpuPercent)%"
         valueLabel.text = "\(settings.cpuPercent)%"
         turboSwitch.isOn = settings.overclock
+        stretchButton.setTitle(settings.stretchMode.title, for: .normal)
+        stretchButton.accessibilityValue = settings.stretchMode.title
+        stretchDetail.text = settings.stretchMode.detail
+        stretchButton.menu = UIMenu(title: "Stretch mode", options: .singleSelection, children: StretchMode.allCases.map { mode in
+            UIAction(title: mode.title, state: settings.stretchMode == mode ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                self.settings.stretchMode = mode
+                self.updateControls()
+                self.onChange?()
+            }
+        })
     }
     @objc private func speedChanged() {
         settings.cpuPercent = Int(slider.value.rounded())
@@ -604,6 +729,7 @@ final class ConfigurationController: UIViewController {
     @objc private func restoreDefaults() {
         settings.cpuPercent = 100
         settings.overclock = true
+        settings.stretchMode = .safeAspect
         updateControls()
         onChange?()
     }

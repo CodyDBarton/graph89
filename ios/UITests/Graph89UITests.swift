@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class Graph89UITests: XCTestCase {
     private func pixels(_ app: XCUIApplication) -> Data? {
@@ -110,6 +111,7 @@ final class Graph89UITests: XCTestCase {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.lifetime = .keepAlways
         add(attachment)
+        app.scrollViews.firstMatch.swipeUp()
         tap(app, "Restore Defaults")
         XCTAssertEqual(app.staticTexts["CPU speed value"].label, "100%")
         XCTAssertEqual(app.switches["Overclock when Busy"].value as? String, "1")
@@ -171,6 +173,103 @@ final class Graph89UITests: XCTestCase {
         print("MAXIMUM_BUSY_RATE: maximum=\(maximumRate), normal=\(normalRate), ratio=\(maximumRate / normalRate)")
     }
 
+    private func chooseStretch(_ app: XCUIApplication, _ mode: String) {
+        tap(app, "Configuration Settings")
+        let chooser = app.buttons["Stretch mode"]
+        app.scrollViews.firstMatch.swipeUp()
+        XCTAssertTrue(chooser.isHittable)
+        chooser.tap()
+        app.buttons[mode].tap()
+        XCTAssertEqual(chooser.value as? String, mode)
+        tap(app, "Done")
+    }
+    func testStretchModesApplyAndPersist() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout: 15))
+        let face = app.otherElements["Calculator button face"]
+        XCTAssertTrue(face.exists)
+        let display = app.images["Calculator display"]
+        let baseLCD = display.frame
+        let baseFace = face.frame
+        XCTAssertEqual(baseLCD.width, baseFace.width, accuracy: 1)
+        let baselineHeight = baseFace.maxY - baseLCD.minY
+        var horizontalHeight: CGFloat = 0
+        for mode in ["Horizontal", "Vertical", "Horizontal and vertical", "Aspect ratio, full", "Aspect ratio, crop", "Aspect ratio; no loss"] {
+            chooseStretch(app, mode)
+            let lcd = display.frame
+            let keys = face.frame
+            let height = keys.maxY - lcd.minY
+            XCTAssertEqual(lcd.width, keys.width, accuracy: 1)
+            XCTAssertEqual(lcd.maxY, keys.minY, accuracy: 1)
+            if mode == "Horizontal" {
+                XCTAssertEqual(height, baselineHeight, accuracy: 1)
+                XCTAssertEqual(lcd.width, app.frame.width, accuracy: 1)
+                horizontalHeight = height
+            } else if mode == "Vertical" {
+                XCTAssertEqual(lcd.width, baseLCD.width, accuracy: 1)
+                XCTAssertEqual(height, app.frame.height, accuracy: 1)
+            } else if mode == "Horizontal and vertical" {
+                XCTAssertEqual(lcd.width, app.frame.width, accuracy: 1)
+                XCTAssertEqual(height, app.frame.height, accuracy: 1)
+                XCTAssertGreaterThanOrEqual(height, horizontalHeight)
+            } else {
+                XCTAssertEqual(height / lcd.width, baselineHeight / baseLCD.width, accuracy: 0.01)
+                if mode == "Aspect ratio; no loss" {
+                    XCTAssertEqual(lcd.width, baseLCD.width, accuracy: 1)
+                    XCTAssertEqual(height, baselineHeight, accuracy: 1)
+                }
+            }
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = mode
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        chooseStretch(app, "Horizontal and vertical")
+        app.terminate()
+        app.launchArguments = ["--ui-test"]
+        app.launch()
+        tap(app, "Configuration Settings")
+        app.scrollViews.firstMatch.swipeUp()
+        XCTAssertEqual(app.buttons["Stretch mode"].value as? String, "Horizontal and vertical")
+        tap(app, "Restore Defaults")
+        XCTAssertEqual(app.buttons["Stretch mode"].value as? String, "Aspect ratio; no loss")
+        tap(app, "Done")
+    }
+
+    func testVisibleCornerGearOpensSettings() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session"]
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout: 15))
+        // Tap the visible gear's center. These are screen coordinates. Use a short press to cover
+        // quick mouse clicks, rather than only XCTest's longer synthetic taps.
+        let isPad = app.frame.width > 600
+        let horizontalInset: CGFloat = isPad ? 25 : 34
+        let verticalInset: CGFloat = isPad ? 42 : 34
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for orientation: UIDeviceOrientation in [.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            Thread.sleep(forTimeInterval: 1)
+            for _ in 0..<2 {
+                // Empty space immediately below the badge must not activate it.
+                app.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0))
+                    .withOffset(CGVector(dx: -horizontalInset, dy: verticalInset + 25))
+                    .press(forDuration: 0.01)
+                XCTAssertFalse(app.sliders["CPU Speed"].exists, "The gear must have no invisible tap area")
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.lifetime = .keepAlways
+                add(shot)
+                app.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0))
+                    .withOffset(CGVector(dx: -horizontalInset, dy: verticalInset)).press(forDuration: 0.01)
+                XCTAssertTrue(app.sliders["CPU Speed"].waitForExistence(timeout: 5), "Tapping the visible gear must open Settings")
+                tap(app, "Done")
+            }
+        }
+    }
+
     func testSettingsRemainReachableInLandscape() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session"]
@@ -181,12 +280,14 @@ final class Graph89UITests: XCTestCase {
         tap(app, "Configuration Settings")
         XCTAssertTrue(app.sliders["CPU Speed"].isHittable)
         app.scrollViews.firstMatch.swipeUp()
-        XCTAssertTrue(app.switches["Overclock when Busy"].isHittable)
+        XCTAssertTrue(app.buttons["Stretch mode"].isHittable)
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.lifetime = .keepAlways
         add(attachment)
         tap(app, "Done")
-        XCTAssertTrue(app.buttons["Configuration Settings"].isHittable)
+        tap(app, "Configuration Settings")
+        XCTAssertTrue(app.sliders["CPU Speed"].waitForExistence(timeout: 5))
+        tap(app, "Done")
     }
 
 }

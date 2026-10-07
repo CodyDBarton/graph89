@@ -25,10 +25,28 @@ Keep the bundled firmware and generated builds local.
 
 ## Configuration Settings
 
-Tap the gear beside the calculator title. CPU Speed ranges from 30% to 250%;
-Overclock when Busy runs extra work while the calculator shows BUSY. Changes apply
-immediately and are saved independently of calculator state. Restore Defaults sets
-100% CPU Speed and enables busy overclocking, matching Android's defaults.
+The LCD and button face have the same width and form one panel. There is no title,
+footer, or system status bar. A translucent gear is nestled against the
+display's upper-right corner in every mode and never changes the panel's size. Its
+44-point circular badge is also its exact touch target; there is no invisible hit area. On iPad, the badge
+sits just below the top system-input strip: real simulator mouse clicks there
+were intercepted before reaching the app, despite synthetic touch tests passing.
+
+Stretch mode is saved and applies immediately:
+
+1. **Aspect ratio; no loss** (default): uniformly fits the panel inside iOS's safe
+   display area, protecting content from corners, cutouts, and gesture margins.
+   These system-provided bounds are conservative; no private corner-radius APIs are used.
+2. **Horizontal**: starts from no loss and stretches only the width to the full display.
+3. **Vertical**: starts from no loss and stretches only the height to the full display.
+4. **Horizontal and vertical**: stretches to fill the full display in both dimensions.
+5. **Aspect ratio, full**: uniformly fits the full display, ignoring rounded corners.
+6. **Aspect ratio, crop**: uniformly fills the full display, clipping any overflow.
+
+CPU Speed ranges from 30% to 250%; Overclock when Busy runs extra work while the
+calculator shows BUSY. Changes apply immediately and are saved independently of
+calculator state. Restore Defaults sets 100% CPU Speed, enables busy overclocking,
+and selects Aspect ratio; no loss.
 
 The iOS port now uses Android's model-specific engine batch size (90,000 CPU-loop
 iterations for this Titanium at 100%) and pause calculation: truncate(30 / speed)
@@ -87,7 +105,8 @@ keyboard coordinates to wake it and enter `2+3`, and compares the displayed resu
 with a reference generated independently by the native emulator. Additional checks
 verify saved settings, actual engine throughput at 30/100/250%, busy overclocking
 using `nInt(sin(x^2),x,0,8)`, sustained maximum throughput and ON interruption
-using the longer limit of 100, and access to settings in landscape. The test uses
+using the longer limit of 100, selection and persistence of all six stretch modes,
+and taps directly on the visible corner gear in portrait and landscape. The test uses
 a separate saved session so it does not overwrite your calculator session.
 
 ## Implementation notes
