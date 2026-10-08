@@ -36,6 +36,8 @@
 	void tiemu_patch(const char* num, const char* vernum);
 
 	void tiemu_run_engine();
+	void tiemu_run_turbo_chunk();
+	int tiemu_is_busy();
 	int  tiemu_read_emulated_screen (uint8_t *return_flags);
 	void tiemu_set_tmp_dir(const char* tmp_dir);
 	int  tiemu_install_rom(const char* source, const char* destination, int calc_type, int is_rom);

@@ -111,3 +111,14 @@ JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiE
 	DbusJNIenv = env;
 	tiemu_run_engine();
 }
+
+JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuRunTurboChunk(JNIEnv *env, jobject obj)
+{
+    DbusJNIenv = env;
+    tiemu_run_turbo_chunk();
+}
+
+JNIEXPORT jboolean JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuIsBusy(JNIEnv *env, jobject obj)
+{
+    return tiemu_is_busy() ? JNI_TRUE : JNI_FALSE;
+}

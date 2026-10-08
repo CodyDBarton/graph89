@@ -45,7 +45,7 @@ public class CalculatorConfiguration
 	public boolean				SaveStateOnExit			= true;
 	public int					CPUSpeed				= 100;
 	public boolean				EnergySave				= true;
-	public boolean				OverclockWhenBusy		= true;
+	public volatile boolean			OverclockWhenBusy		= true;
 	public String				Orientation				= "Portrait";
 	public boolean				UseLCDGrid				= false;
 

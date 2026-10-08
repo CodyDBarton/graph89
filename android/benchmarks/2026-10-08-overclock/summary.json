@@ -1,0 +1,19 @@
+{
+  "expression": "nInt(sin(x^2),x,0,8)",
+  "trials_per_mode": 10,
+  "warmups_per_mode": 1,
+  "before_mean_seconds": 0.3377076084,
+  "after_mean_seconds": 0.3181991711,
+  "before_median_seconds": 0.326422521,
+  "after_median_seconds": 0.3154909375,
+  "before_stdev_seconds": 0.020525519679210038,
+  "after_stdev_seconds": 0.00721727645512931,
+  "throughput_gain_percent": 6.130888786592448,
+  "time_reduction_percent": 5.776724247471831,
+  "same_result_region": true,
+  "scope": "Actual optimized ARM64 Android apps in the same Android 11 emulator on M4; alternating trials restored the same pre-Enter state. Identical temporary native hooks time BUSY entry to exit; app UI and normal screen thread remain active. CPU speed 100%, busy overclock enabled, grayscale and energy save disabled.",
+  "before_commit": "806c97b18dafee78844dcd3bb3950e5c6dc235c4",
+  "after_version_code": 1138,
+  "median_throughput_gain_percent": 3.4649437434316255,
+  "state_sha256": "e9f534cf9c7c6086f4592ac42d4ba5d1073a7c20de7388f28a2b622114bfbd49"
+}

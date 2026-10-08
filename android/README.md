@@ -2,7 +2,7 @@
 
 The active personal build is ARM64 only; `android/build.sh` builds only that APK. The ARM32 flavor remains as a historical comparison and is no longer part of the normal build.
 
-These personal builds retain Graph89 1.1.3c's Android UI, CPU speed setting, and original busy-calculation loop. Both use the same native compiler and optimization flags. Only their ARM architecture, app name, package ID, and separate storage paths differ.
+The personal builds retain Graph89 1.1.3c's Android UI and CPU speed setting. The original architecture comparison used the same busy-calculation loop and compiler flags; the active ARM64 build now uses the unthrottled busy loop described below.
 
 | Build | Native ABI | App ID |
 | --- | --- | --- |
@@ -60,3 +60,13 @@ Build code 1137 ports the iOS screenshot-based ON/OFF drawing to Android's portr
 For TI-89 Titanium, ON is now sent to the emulated calculator instead of opening the emulator menu. 2ND + ON performs OFF; system Back still opens the emulator options. Other calculator models retain their existing menu-key behavior.
 
 Build 1137 validation: ARM64 release build and release lint passed; APK signature verified. Visually checked the ON/OFF artwork on an isolated Android emulator, confirmed 2ND + ON blanks the calculator LCD, ON wakes it, and system Back still opens the Configuration Settings menu.
+
+## Unthrottled busy overclocking
+
+Build code 1138 removes the old limit of 30 extra engine batches and the 1 ms busy-loop sleep. With Overclock when Busy enabled and no touch key held, the engine runs continuously while the calculator's BUSY pixel is set. It checks BUSY directly in native LCD memory instead of waiting for a screen redraw. Turbo chunks run 10,000 CPU-loop iterations independently of the CPU Speed slider, matching the iOS turbo chunk size. Every chunk checks keys, stop requests, state operations, and the overclock setting; after approximately 10 ms the outer loop services remaining work without a deliberate pause.
+
+Holding a calculator key temporarily restores normal pacing, as on iOS, to keep key repeats usable. Idle operation and disabling overclocking retain the normal CPU-speed pacing. ON interrupts a calculation, displaying the calculator's Break message. The emulated CPU remains single-threaded: unthrottled execution can occupy one host CPU core, rather than spreading one instruction stream across all cores.
+
+Validation (2026-10-08): ARM64 release build and release lint passed. On an isolated ARM64 Android 11 emulator, `nInt(sin(x^2),x,0,100)` showed BUSY with the engine thread at 100% CPU in a sampled interval. Tapping ON produced Error: Break. Disabling overclocking through Configuration Settings returned the busy engine to normal pacing (8% CPU in the sampled interval); ON still interrupted, and subsequent `2+3` returned `5`. These CPU samples confirm pacing behavior; they do not establish a measured S22 Ultra speed increase.
+
+Before/after emulator calculation timing: [2026-10-08 benchmark report](benchmarks/2026-10-08-overclock/README.md). Ten trials per build averaged 337.708 ms before versus 318.199 ms after for `nInt(sin(x^2),x,0,8)`: 6.13% higher throughput, or 5.78% less time. Results matched. This is an M4-hosted emulator measurement, not a Galaxy S22 Ultra measurement.

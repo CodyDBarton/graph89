@@ -27,11 +27,14 @@ import com.graph89.common.KeyPress;
 public class ButtonState
 {
 	public static int				ActivePointerID	= -1;
+	private static volatile int heldKeyCount = 0;
+	public static boolean HasHeldKeys() { return heldKeyCount != 0; }
 	private static List<KeyPress>	sPressedButtons	= new ArrayList<KeyPress>();
 
 	public static void Reset()
 	{
 		sPressedButtons.clear();
+		heldKeyCount = 0;
 		ActivePointerID = -1;
 	}
 
@@ -51,6 +54,7 @@ public class ButtonState
 		if (!found)
 		{
 			sPressedButtons.add(key);
+			heldKeyCount = sPressedButtons.size();
 			EmulatorActivity.SendKeyToCalc(key.KeyCode, 1, true);
 		}
 
@@ -68,6 +72,7 @@ public class ButtonState
 				EmulatorActivity.SendKeyToCalc(button.KeyCode, 0, false);
 				RefreshButtonHighlightView();
 				sPressedButtons.remove(i);
+				heldKeyCount = sPressedButtons.size();
 				return;
 			}
 		}
@@ -81,6 +86,7 @@ public class ButtonState
 			EmulatorActivity.SendKeyToCalc(button.KeyCode, 0, false);
 		}
 		sPressedButtons.clear();
+		heldKeyCount = 0;
 		RefreshButtonHighlightView();
 	}
 

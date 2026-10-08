@@ -176,6 +176,18 @@ void tiemu_run_engine()
 	hw_m68k_run(cpu_cycles / 4);
 }
 
+void tiemu_run_turbo_chunk()
+{
+    hw_m68k_run(10000);
+}
+
+int tiemu_is_busy()
+{
+    // The same BUSY pixel as the screen reader, checked without waiting for redraw.
+    return tihw.on_off && raw_height > 0 && raw_width >= 8 &&
+        (tihw.ram[tihw.lcd_adr + (raw_height - 1) * LCDMEM_W / 8 + raw_width / 8 - 1] & g89_shift_table[7]);
+}
+
 int tiemu_read_emulated_screen (uint8_t *return_flags)
 {
 	int i, j, k;

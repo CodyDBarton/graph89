@@ -812,6 +812,8 @@ public class EmulatorActivity extends Graph89ActivityBase
 	public native static int  nativeTiEmuStep4Reset();
 	public native static int  nativeTiEmuLoadState(String filename);
 	public native static int  nativeTiEmuRunEngine();
+	public native static void nativeTiEmuRunTurboChunk();
+	public native static boolean nativeTiEmuIsBusy();
 	public native static int  nativeTiEmuSaveState(String filename);
 	public native static void nativeTiEmuSyncClock();
 	public native static void nativeTiEmuPatch(String sr, String version);

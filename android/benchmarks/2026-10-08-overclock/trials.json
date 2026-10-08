@@ -1,0 +1,156 @@
+[
+  {
+    "mode": "before",
+    "trial": -1,
+    "warmup": true,
+    "seconds": 0.325914416,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": -1,
+    "warmup": true,
+    "seconds": 0.310858959,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 0,
+    "warmup": false,
+    "seconds": 0.320978416,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 0,
+    "warmup": false,
+    "seconds": 0.309618167,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 1,
+    "warmup": false,
+    "seconds": 0.309269792,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 1,
+    "warmup": false,
+    "seconds": 0.323959709,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 2,
+    "warmup": false,
+    "seconds": 0.323601666,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 2,
+    "warmup": false,
+    "seconds": 0.321957667,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 3,
+    "warmup": false,
+    "seconds": 0.323890751,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 3,
+    "warmup": false,
+    "seconds": 0.369148375,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 4,
+    "warmup": false,
+    "seconds": 0.328502042,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 4,
+    "warmup": false,
+    "seconds": 0.313715333,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 5,
+    "warmup": false,
+    "seconds": 0.315098417,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 5,
+    "warmup": false,
+    "seconds": 0.32546825,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 6,
+    "warmup": false,
+    "seconds": 0.327323792,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 6,
+    "warmup": false,
+    "seconds": 0.329832792,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 7,
+    "warmup": false,
+    "seconds": 0.315879417,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 7,
+    "warmup": false,
+    "seconds": 0.363946959,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 8,
+    "warmup": false,
+    "seconds": 0.32552125,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 8,
+    "warmup": false,
+    "seconds": 0.315102458,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "after",
+    "trial": 9,
+    "warmup": false,
+    "seconds": 0.327626917,
+    "result_hash": "9027914958173489408"
+  },
+  {
+    "mode": "before",
+    "trial": 9,
+    "warmup": false,
+    "seconds": 0.368625625,
+    "result_hash": "9027914958173489408"
+  }
+]

@@ -221,29 +221,31 @@ public class TIEmuThread extends EmulatorThread implements Runnable
 						Activity.HandlerTerminate();
 					}
 
-					if (!IsSleeping)
-					{
-						EmulatorActivity.nativeTiEmuRunEngine();
-						firstCycleComplete = true;
-					}
-
-					turbo = EmulatorActivity.ActiveInstance.Configuration.OverclockWhenBusy && skin.Screen.isBusy();
-
-					if (turbo && !IsSleeping)
-					{
-						// run it in a loop.
-						//one iteration takes 4ms
-						for (int i = 0; i < 30 && KillFlag == false && skin.Screen.isBusy(); ++i)
-						{
-							EmulatorActivity.nativeTiEmuRunEngine();
-						}
-
-						Thread.sleep(1);
-					}
-					else
-					{
-						Thread.sleep(sleepInterval);
-					}
+                    turbo = CalculatorInstance.Configuration.OverclockWhenBusy
+                            && !ButtonState.HasHeldKeys() && EmulatorActivity.nativeTiEmuIsBusy();
+                    if (turbo && !IsSleeping)
+                    {
+                        // No throttle while BUSY: short native chunks keep key and
+                        // lifecycle checks frequent without intentionally sleeping.
+                        long deadline = System.nanoTime() + 10_000_000L;
+                        do {
+                            EmulatorActivity.nativeTiEmuRunTurboChunk();
+                            firstCycleComplete = true;
+                        } while (System.nanoTime() < deadline && !KillFlag
+                                && !LoadState && !SaveState && !ResetCalc
+                                && !ButtonState.HasHeldKeys()
+                                && CalculatorInstance.Configuration.OverclockWhenBusy
+                                && EmulatorActivity.nativeTiEmuIsBusy());
+                        // Immediately continue; the outer loop services pending work.
+                    }
+                    else
+                    {
+                        if (!IsSleeping) {
+                            EmulatorActivity.nativeTiEmuRunEngine();
+                            firstCycleComplete = true;
+                        }
+                        Thread.sleep(sleepInterval);
+                    }
 				}
 			}
 			catch (InterruptedException e)
