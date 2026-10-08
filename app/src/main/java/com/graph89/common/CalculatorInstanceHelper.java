@@ -195,6 +195,25 @@ public class CalculatorInstanceHelper
 					sInstances = gsonHelper.fromJson(instancesJson, new TypeToken<List<CalculatorInstance>>() {
 					}.getType());
 				}
+
+				// Repair the old automatic Titanium default once, allowing later
+				// deliberate skin selections to persist without being overridden.
+				String migration = "titanium_default_skin_v1";
+				if (!ConfigurationHelper.getBoolean(mContext, migration, false))
+				{
+					boolean changed = false;
+					for (CalculatorInstance instance : sInstances)
+					{
+						if (instance.CalculatorType == CalculatorTypes.TI89T &&
+							instance.Configuration.Skin == SkinDefinition.BUILD_IN_89_DEFAULT)
+						{
+							instance.Configuration.Skin = SkinDefinition.BUILD_IN_89T_CLASSIC;
+							changed = true;
+						}
+					}
+					if (changed) Save();
+					ConfigurationHelper.writeBoolean(mContext, migration, true);
+				}
 			}
 		}
 	}

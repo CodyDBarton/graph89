@@ -64,7 +64,7 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		Init();
 		super.onCreate(savedInstanceState);
 		this.setRequestedOrientation(EmulatorActivity.Orientation);
-		addPreferencesFromResource(R.layout.settings_instance);
+		addPreferencesFromResource(R.xml.settings_instance);
 
 		InitMembers();
 

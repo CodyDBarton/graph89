@@ -52,6 +52,26 @@ G_GNUC_EXTENSION typedef unsigned long long guint64;
 #define G_GINT64_FORMAT "lli"
 #define G_GUINT64_FORMAT "llu"
 
+#if defined(__LP64__)
+#define GLIB_SIZEOF_VOID_P 8
+#define GLIB_SIZEOF_LONG 8
+#define GLIB_SIZEOF_SIZE_T 8
+
+typedef signed long gssize;
+typedef unsigned long gsize;
+#define G_GSIZE_MODIFIER "l"
+#define G_GSSIZE_FORMAT "li"
+#define G_GSIZE_FORMAT "lu"
+
+#define G_MAXSIZE	G_MAXULONG
+
+#define GPOINTER_TO_INT(p)	((gint)   (glong) (p))
+#define GPOINTER_TO_UINT(p)	((guint)  (glong) (p))
+
+#define GINT_TO_POINTER(i)	((gpointer)  (glong) (i))
+#define GUINT_TO_POINTER(u)	((gpointer)  (gulong) (u))
+
+#else
 #define GLIB_SIZEOF_VOID_P 4
 #define GLIB_SIZEOF_LONG   4
 #define GLIB_SIZEOF_SIZE_T 4
@@ -69,6 +89,8 @@ typedef unsigned int gsize;
 
 #define GINT_TO_POINTER(i)	((gpointer)  (i))
 #define GUINT_TO_POINTER(u)	((gpointer)  (u))
+
+#endif
 
 #ifdef NeXT /* @#%@! NeXTStep */
 # define g_ATEXIT(proc)	(!atexit (proc))
@@ -138,7 +160,7 @@ typedef struct _GMutex* GStaticMutex;
 typedef union _GSystemThread GSystemThread;
 union _GSystemThread
 {
-  char   data[4];
+  char   data[GLIB_SIZEOF_VOID_P];
   double dummy_double;
   void  *dummy_pointer;
   long   dummy_long;
@@ -158,10 +180,17 @@ union _GSystemThread
 #define GUINT64_TO_LE(val)	((guint64) (val))
 #define GINT64_TO_BE(val)	((gint64) GUINT64_SWAP_LE_BE (val))
 #define GUINT64_TO_BE(val)	(GUINT64_SWAP_LE_BE (val))
+#if defined(__LP64__)
+#define GLONG_TO_LE(val)	((glong) GINT64_TO_LE (val))
+#define GULONG_TO_LE(val)	((gulong) GUINT64_TO_LE (val))
+#define GLONG_TO_BE(val)	((glong) GINT64_TO_BE (val))
+#define GULONG_TO_BE(val)	((gulong) GUINT64_TO_BE (val))
+#else
 #define GLONG_TO_LE(val)	((glong) GINT32_TO_LE (val))
 #define GULONG_TO_LE(val)	((gulong) GUINT32_TO_LE (val))
 #define GLONG_TO_BE(val)	((glong) GINT32_TO_BE (val))
 #define GULONG_TO_BE(val)	((gulong) GUINT32_TO_BE (val))
+#endif
 #define GINT_TO_LE(val)		((gint) GINT32_TO_LE (val))
 #define GUINT_TO_LE(val)	((guint) GUINT32_TO_LE (val))
 #define GINT_TO_BE(val)		((gint) GINT32_TO_BE (val))

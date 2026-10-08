@@ -51,7 +51,11 @@
 #define SIZEOF_INT 4
 
 /* The number of bytes in a long.  */
+#if defined(__LP64__)
+#define SIZEOF_LONG 8
+#else
 #define SIZEOF_LONG 4
+#endif
 
 /* The number of bytes in a long long.  */
 #define SIZEOF_LONG_LONG 8

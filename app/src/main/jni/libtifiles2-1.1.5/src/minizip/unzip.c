@@ -1,3 +1,4 @@
+#include <stdint.h> /* ZipCrypto keys remain 32-bit on LP64 hosts. */
 /* unzip.c -- IO for uncompress .zip files using zlib
    Version 1.01h, December 28th, 2009
 
@@ -149,8 +150,8 @@ typedef struct
                                         file if we are decompressing it */
     int encrypted;
 #    ifndef NOUNCRYPT
-    unsigned long keys[3];     /* keys defining the pseudo-random sequence */
-    const unsigned long* pcrc_32_tab;
+    uint32_t keys[3];     /* keys defining the pseudo-random sequence */
+    const z_crc_t* pcrc_32_tab;
 #    endif
 } unz_s;
 

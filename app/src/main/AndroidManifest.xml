@@ -7,8 +7,9 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
-        android:icon="@drawable/ic_launcher"
-        android:label="Graph 89"
+        android:icon="@mipmap/ic_launcher_titanium"
+        android:roundIcon="@mipmap/ic_launcher_titanium"
+        android:label="@string/comparison_app_name"
         android:theme="@style/Graph89Theme"
         android:requestLegacyExternalStorage="true"
         android:allowBackup="true">
@@ -28,7 +29,7 @@
             android:label="Add ROM" />
         <activity
             android:name="com.graph89.emulationcore.InstanceConfigurationPage"
-            android:label="ROM Configuration" />
+            android:label="Configuration Settings" />
         <activity
             android:name="com.graph89.emulationcore.GlobalConfigurationPage"
             android:label="Settings" />

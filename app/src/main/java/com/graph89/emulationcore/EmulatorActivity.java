@@ -221,21 +221,26 @@ public class EmulatorActivity extends Graph89ActivityBase
 	}
 
 	@Override
+	public void onBackPressed()
+	{
+		if (InitComplete && UIStateManagerObj != null && !NoRomsConfigured)
+		{
+			LastTouched = new Date();
+			UIStateManagerObj.handleActionListVisibility();
+			return;
+		}
+		if (InitComplete) EngineExit();
+		super.onBackPressed();
+	}
+
+	@Override
 	public boolean onKeyDown(int keyCode, KeyEvent event)
 	{
 		if (!InitComplete) return false;
 
 		LastTouched = new Date();
 
-		if (keyCode == KeyEvent.KEYCODE_BACK) {
-			if (UIStateManagerObj != null && UIStateManagerObj.AreActionsVisible() && !NoRomsConfigured) {
-				UIStateManagerObj.handleActionListVisibility();
-				return true;
-			} else {
-				EngineExit();
-				return super.onKeyDown(keyCode, event);
-			}
-		} else if (keyCode == KeyEvent.KEYCODE_MENU) {
+		if (keyCode == KeyEvent.KEYCODE_MENU) {
 			if (UIStateManagerObj != null) {
 				UIStateManagerObj.handleActionListVisibility();
 			}
@@ -420,7 +425,7 @@ public class EmulatorActivity extends Graph89ActivityBase
 			}
 			else if (ActiveInstance.CalculatorType == CalculatorTypes.TI89T)
 			{
-				ActiveInstance.Configuration.Skin = SkinDefinition.BUILD_IN_89_DEFAULT;
+				ActiveInstance.Configuration.Skin = SkinDefinition.BUILD_IN_89T_CLASSIC;
 			}
 			else if (ActiveInstance.CalculatorType == CalculatorTypes.V200)
 			{
@@ -511,7 +516,9 @@ public class EmulatorActivity extends Graph89ActivityBase
 				}
 			}
 
-			if (key == CurrentSkin.CalculatorInfo.OnKey) {
+			// Titanium uses a real ON/OFF key; system Back opens emulator options.
+			if (key == CurrentSkin.CalculatorInfo.OnKey &&
+				ActiveInstance.CalculatorType != CalculatorTypes.TI89T) {
 				if (active == 0 && UIStateManagerObj != null) {
 					UIStateManagerObj.handleActionListVisibility();
 				}

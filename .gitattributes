@@ -1,0 +1,2 @@
+# Keep the Unix build wrapper executable on macOS and Linux.
+gradlew text eol=lf

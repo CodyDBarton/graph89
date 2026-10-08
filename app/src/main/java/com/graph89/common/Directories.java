@@ -45,22 +45,22 @@ public class Directories
 
 	public static String getScreenShotDirectory(Graph89ActivityBase activity)
 	{
-		return Util.GetMediaRootFolder(activity) + "graph89/screenshots/";
+		return Util.GetMediaRootFolder(activity) + activity.getPackageName() + "/screenshots/";
 	}
 
 	public static String getLicenceFile(Graph89ActivityBase activity)
 	{
-		return Util.GetMediaRootFolder(activity) + "graph89/licence.lic";
+		return Util.GetMediaRootFolder(activity) + activity.getPackageName() + "/licence.lic";
 	}
 
 	public static String getReceivedDirectory(Graph89ActivityBase activity)
 	{
-		return Util.GetMediaRootFolder(activity) + "graph89/received/";
+		return Util.GetMediaRootFolder(activity) + activity.getPackageName() + "/received/";
 	}
 
 	public static String getBackupDirectory(Graph89ActivityBase activity)
 	{
-		return Util.GetMediaRootFolder(activity) + "graph89/backup/";
+		return Util.GetMediaRootFolder(activity) + activity.getPackageName() + "/backup/";
 	}
 
 	public static String getRestoreDirectory(Graph89ActivityBase activity)

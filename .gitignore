@@ -62,3 +62,7 @@ release/
 /ios/build/
 xcuserdata/
 *.xcuserstate
+
+# Local macOS metadata and screenshot reference
+.DS_Store
+/Screenshot_20261001_183836.jpg

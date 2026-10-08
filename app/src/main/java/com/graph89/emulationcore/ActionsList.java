@@ -79,7 +79,7 @@ public class ActionsList extends ListView
 		ActionEntries.add(new ListItem(RESET, "Reset"));
 		ActionEntries.add(new ListItem(BACKUP_MANAGER, "Backup Manager"));
 		ActionEntries.add(new ListItem(ROM_MANAGER, "ROM Manager"));
-		ActionEntries.add(new ListItem(INSTANCE_CONFIGURATION, "ROM Configuration"));
+		ActionEntries.add(new ListItem(INSTANCE_CONFIGURATION, "Configuration Settings"));
 		ActionEntries.add(new ListItem(GLOBAL_CONFIGURATION, "Settings"));
 		ActionEntries.add(new ListItem(ABOUT, "About"));
 	}

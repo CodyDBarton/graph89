@@ -2,20 +2,35 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 29
+    buildToolsVersion "30.0.3"
+    ndkVersion "23.2.8568313"
     defaultConfig {
         applicationId "com.Bisha.TI89EmuDonation"
-        minSdkVersion 8
+        minSdkVersion 21
         targetSdkVersion 29
-        versionCode 1133
+        versionCode 1137
         versionName "1.1.3c"
-        ndk {
-            // TODO: Fix 64-bit ABIs
-            //abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
-            abiFilters 'armeabi-v7a', 'x86'
+    }
+    // Separate packages allow comparison without replacing the paid app.
+    flavorDimensions "architecture"
+    productFlavors {
+        arm32 {
+            dimension "architecture"
+            applicationId "com.codybarton.graph89.arm32"
+            resValue "string", "comparison_app_name", "Graph89 32-bit"
+            ndk { abiFilters "armeabi-v7a" }
+        }
+        arm64 {
+            dimension "architecture"
+            applicationId "com.codybarton.graph89.arm64"
+            resValue "string", "comparison_app_name", "Graph89 64-bit"
+            ndk { abiFilters "arm64-v8a" }
         }
     }
     buildTypes {
         release {
+            // Optimized personal APKs, signed with the local development key.
+            signingConfig signingConfigs.debug
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

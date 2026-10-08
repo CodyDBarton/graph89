@@ -24,7 +24,7 @@ public class GlobalConfigurationPage extends PreferenceActivity implements OnSha
 		super.onCreate(savedInstanceState);
 
 		this.setRequestedOrientation(EmulatorActivity.Orientation);
-		addPreferencesFromResource(R.layout.settings_global);
+		addPreferencesFromResource(R.xml.settings_global);
 		initSettings();
 	}
 

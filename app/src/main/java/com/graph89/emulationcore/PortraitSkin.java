@@ -151,6 +151,7 @@ public class PortraitSkin extends SkinBase
 			this.SkinPositionInCanvas = destination;
 
 			skinCanvas.drawBitmap(buttonsImage, source, destination, Util.FilteredPaint);
+			TitaniumPowerKey.draw(skinCanvas, SkinDefnition.ImagePath, destination);
 
 			// Draw the screen space///
 			Paint screenSpacePaint = new Paint();
