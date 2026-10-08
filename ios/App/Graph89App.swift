@@ -1,4 +1,5 @@
 import UIKit
+import CoreHaptics
 import Darwin
 
 @main
@@ -37,9 +38,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 final class CalculatorController: UIViewController {
     private let settingsButton = CornerSettingsButton(frame: .zero)
     private let settings = CalculatorSettings()
+    private let keyHaptics = CalculatorHaptics()
     private let engine = CalculatorEngine()
     private var framePending = false
     private let engineMonitor = UILabel()
+    private let hapticMonitor = UILabel()
     private let lcd = UIImageView()
     private let lcdBezel = UIView()
     private let keyboard = CalculatorKeyboard()
@@ -73,10 +76,19 @@ final class CalculatorController: UIViewController {
             engineMonitor.accessibilityLabel = "Engine status"
             engineMonitor.textColor = .clear
             view.addSubview(engineMonitor)
+            hapticMonitor.isAccessibilityElement = true
+            hapticMonitor.accessibilityIdentifier = "Haptic requests"
+            hapticMonitor.accessibilityLabel = "Haptic requests"
+            hapticMonitor.accessibilityValue = "0"
+            hapticMonitor.textColor = .clear
+            view.addSubview(hapticMonitor)
         }
         keyboard.accessibilityIdentifier = "Calculator button face"
         keyboard.onKey = { [weak self] key, pressed in
-            self?.setKey(key, pressed: pressed)
+            guard let self else { return }
+            if pressed && self.ready { self.keyHaptics.play() }
+            self.hapticMonitor.accessibilityValue = String(self.keyHaptics.requests)
+            self.setKey(key, pressed: pressed)
         }
         DispatchQueue.main.async { [weak self] in self?.start() }
     }
@@ -111,6 +123,7 @@ final class CalculatorController: UIViewController {
                                       y: area.minY + topOffset - buttonRadius,
                                       width: CornerSettingsButton.diameter, height: CornerSettingsButton.diameter)
         engineMonitor.frame = CGRect(x: area.minX, y: area.minY, width: 1, height: 1)
+        hapticMonitor.frame = CGRect(x: area.minX + 2, y: area.minY, width: 1, height: 1)
     }
 
     private func showError(_ message: String) {
@@ -183,6 +196,7 @@ final class CalculatorController: UIViewController {
         controller.onChange = { [weak self] in
             guard let self else { return }
             self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock)
+            self.keyHaptics.configure(duration: self.settings.hapticDuration)
             self.view.setNeedsLayout()
         }
         let navigation = UINavigationController(rootViewController: controller)
@@ -220,6 +234,7 @@ final class CalculatorController: UIViewController {
     func pause() {
         running = false
         engine.pause()
+        keyHaptics.pause()
         keyboard.releaseAll()
         for task in releases.values { task.cancel() }
         releases.removeAll()
@@ -230,6 +245,7 @@ final class CalculatorController: UIViewController {
         guard ready else { return }
         running = true
         engine.resume()
+        keyHaptics.resume(duration: settings.hapticDuration)
         tick()
     }
     func save() {
@@ -600,6 +616,72 @@ enum StretchMode: String, CaseIterable {
     }
 }
 
+final class CalculatorHaptics {
+    private(set) var requests = 0
+    private var engine: CHHapticEngine?
+    private var player: CHHapticPatternPlayer?
+    private var duration = 8
+    private var active = false
+    private let supported = CHHapticEngine.capabilitiesForHardware().supportsHaptics
+
+    func configure(duration: Int) {
+        let value = min(30, max(0, duration))
+        if self.duration != value { player = nil }
+        self.duration = value
+        if value == 0 { engine?.stop(completionHandler: nil) }
+        else if active { prepare() }
+    }
+    func resume(duration: Int) {
+        active = true
+        configure(duration: duration)
+    }
+    func pause() {
+        active = false
+        engine?.stop(completionHandler: nil)
+    }
+    private func prepare() {
+        guard active, duration > 0, supported else { return }
+        do {
+            if engine == nil {
+                let engine = try CHHapticEngine()
+                engine.playsHapticsOnly = true
+                engine.isAutoShutdownEnabled = true
+                engine.resetHandler = { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.player = nil
+                        self?.prepare()
+                    }
+                }
+                self.engine = engine
+            }
+            guard let engine else { return }
+            try engine.start()
+            if player == nil {
+                let event = CHHapticEvent(eventType: .hapticContinuous, parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
+                ], relativeTime: 0, duration: Double(duration) / 1000)
+                player = try engine.makePlayer(with: CHHapticPattern(events: [event], parameters: []))
+            }
+        } catch {
+            // Haptics are optional; unavailable hardware or an interruption must
+            // never prevent a calculator key from reaching the emulator.
+            player = nil
+        }
+    }
+    func play() {
+        guard active, duration > 0 else { return }
+        requests += 1
+        guard supported else { return }
+        prepare()
+        do {
+            // Restart instead of stacking vibrations when keys are pressed quickly.
+            try? player?.stop(atTime: CHHapticTimeImmediate)
+            try player?.start(atTime: CHHapticTimeImmediate)
+        } catch { player = nil }
+    }
+}
+
 final class CalculatorSettings {
     private let defaults: UserDefaults
     var cpuPercent: Int {
@@ -607,6 +689,9 @@ final class CalculatorSettings {
     }
     var overclock: Bool {
         didSet { defaults.set(overclock, forKey: "overclockWhenBusy") }
+    }
+    var hapticDuration: Int {
+        didSet { defaults.set(hapticDuration, forKey: "hapticDuration") }
     }
     var stretchMode: StretchMode {
         didSet { defaults.set(stretchMode.rawValue, forKey: "stretchMode") }
@@ -617,9 +702,10 @@ final class CalculatorSettings {
         if testing && ProcessInfo.processInfo.arguments.contains("--reset-settings") {
             defaults.removePersistentDomain(forName: "com.codybarton.graph89.settings-tests")
         }
-        defaults.register(defaults: ["cpuPercent": 100, "overclockWhenBusy": true])
+        defaults.register(defaults: ["cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 8])
         cpuPercent = min(250, max(30, defaults.integer(forKey: "cpuPercent")))
         overclock = defaults.bool(forKey: "overclockWhenBusy")
+        hapticDuration = min(30, max(0, defaults.integer(forKey: "hapticDuration")))
         stretchMode = StretchMode(rawValue: defaults.string(forKey: "stretchMode") ?? "") ?? .safeAspect
     }
 }
@@ -632,6 +718,8 @@ final class ConfigurationController: UIViewController {
     private let turboSwitch = UISwitch()
     private let stretchButton = UIButton(type: .system)
     private let stretchDetail = UILabel()
+    private let hapticSlider = UISlider()
+    private let hapticValue = UILabel()
 
     init(settings: CalculatorSettings) {
         self.settings = settings
@@ -717,6 +805,26 @@ final class ConfigurationController: UIViewController {
         stretchDetail.textColor = .secondaryLabel
         stretchDetail.numberOfLines = 0
         stack.addArrangedSubview(stretchDetail)
+        let hapticLabel = UILabel()
+        hapticLabel.text = "Haptic Feedback"
+        hapticLabel.font = .preferredFont(forTextStyle: .headline)
+        hapticValue.font = .monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
+        hapticValue.textAlignment = .right
+        hapticValue.accessibilityIdentifier = "Haptic duration value"
+        let hapticRow = UIStackView(arrangedSubviews: [hapticLabel, hapticValue])
+        hapticRow.distribution = .fillEqually
+        stack.addArrangedSubview(hapticRow)
+        hapticSlider.minimumValue = 0
+        hapticSlider.maximumValue = 30
+        hapticSlider.accessibilityLabel = "Haptic Feedback"
+        hapticSlider.addTarget(self, action: #selector(hapticChanged), for: .valueChanged)
+        stack.addArrangedSubview(hapticSlider)
+        let hapticDetail = UILabel()
+        hapticDetail.text = "One vibration per calculator key press. Duration: 0–30 ms; 0 disables feedback. Default: 8 ms. Requires a device with haptic hardware."
+        hapticDetail.font = .preferredFont(forTextStyle: .subheadline)
+        hapticDetail.textColor = .secondaryLabel
+        hapticDetail.numberOfLines = 0
+        stack.addArrangedSubview(hapticDetail)
         let reset = UIButton(type: .system)
         reset.setTitle("Restore Defaults", for: .normal)
         reset.addTarget(self, action: #selector(restoreDefaults), for: .touchUpInside)
@@ -728,6 +836,10 @@ final class ConfigurationController: UIViewController {
         slider.accessibilityValue = "\(settings.cpuPercent)%"
         valueLabel.text = "\(settings.cpuPercent)%"
         turboSwitch.isOn = settings.overclock
+        hapticSlider.value = Float(settings.hapticDuration)
+        let hapticText = settings.hapticDuration == 0 ? "Disabled" : "\(settings.hapticDuration) ms"
+        hapticValue.text = hapticText
+        hapticSlider.accessibilityValue = hapticText
         stretchButton.setTitle(settings.stretchMode.title, for: .normal)
         stretchButton.accessibilityValue = settings.stretchMode.title
         stretchDetail.text = settings.stretchMode.detail
@@ -749,10 +861,16 @@ final class ConfigurationController: UIViewController {
         settings.overclock = turboSwitch.isOn
         onChange?()
     }
+    @objc private func hapticChanged() {
+        settings.hapticDuration = Int(hapticSlider.value.rounded())
+        updateControls()
+        onChange?()
+    }
     @objc private func restoreDefaults() {
         settings.cpuPercent = 100
         settings.overclock = true
         settings.stretchMode = .safeAspect
+        settings.hapticDuration = 8
         updateControls()
         onChange?()
     }

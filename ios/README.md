@@ -46,7 +46,12 @@ Stretch mode is saved and applies immediately:
 CPU Speed ranges from 30% to 250%; Overclock when Busy runs extra work while the
 calculator shows BUSY. Changes apply immediately and are saved independently of
 calculator state. Restore Defaults sets 100% CPU Speed, enables busy overclocking,
-and selects Aspect ratio; no loss.
+selects Aspect ratio; no loss, and restores 8 ms haptic feedback.
+
+Haptic Feedback matches Android's 0–30 ms duration setting (8 ms by default,
+0 disables it). A vibration plays once on each calculator key press, never on
+release. Core Haptics provides timed vibration on supported hardware; the physical
+feel differs by device. Simulators and devices without haptic hardware remain silent.
 
 The iOS port now uses Android's model-specific engine batch size (90,000 CPU-loop
 iterations for this Titanium at 100%) and pause calculation: truncate(30 / speed)
@@ -106,7 +111,8 @@ with a reference generated independently by the native emulator. Additional chec
 verify saved settings, actual engine throughput at 30/100/250%, busy overclocking
 using `nInt(sin(x^2),x,0,8)`, sustained maximum throughput and ON interruption
 using the longer limit of 100, selection and persistence of all six stretch modes,
-and taps directly on the visible corner gear in portrait and landscape. The test uses
+direct taps on the visible corner gear in portrait and landscape, and haptic
+duration persistence, disabling, and one request per key press. The test uses
 a separate saved session so it does not overwrite your calculator session.
 
 ## Implementation notes

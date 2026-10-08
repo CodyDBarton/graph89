@@ -118,6 +118,60 @@ final class Graph89UITests: XCTestCase {
         tap(app, "Done")
         print("ENGINE_RATES: 30%=\(slow), 100%=\(baseline), 250%=\(fast)")
     }
+    func testHapticDurationAndKeyPressBehavior() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout: 15))
+        func waitForCalculator() {
+            let ready = NSPredicate { _, _ in self.pixels(app)?.count == 16000 }
+            expectation(for: ready, evaluatedWith: app.images["Calculator display"])
+            waitForExpectations(timeout: 15)
+        }
+        waitForCalculator()
+        func requests() -> String? { app.staticTexts["Haptic requests"].value as? String }
+        func openHaptics() {
+            tap(app, "Configuration Settings")
+            app.scrollViews.firstMatch.swipeUp()
+            XCTAssertTrue(app.sliders["Haptic Feedback"].isHittable)
+        }
+        func endpoint(_ high: Bool) {
+            let slider = app.sliders["Haptic Feedback"]
+            slider.adjust(toNormalizedSliderPosition: high ? 1 : 0)
+            let label = app.staticTexts["Haptic duration value"].label
+            let current = Double(label.split(separator: " ").first ?? "0") ?? 0
+            slider.coordinate(withNormalizedOffset: CGVector(dx: current / 30, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: high ? 1.15 : -0.15, dy: 0.5)))
+        }
+        app.buttons["HOME"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1)
+        Thread.sleep(forTimeInterval: 0.2)
+        XCTAssertEqual(requests(), "1", "Holding and releasing a key must produce only one haptic request")
+        openHaptics()
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "8 ms")
+        endpoint(false)
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "Disabled")
+        tap(app, "Done")
+        XCTAssertEqual(requests(), "1", "Settings buttons must not trigger calculator haptics")
+        tap(app, "CLEAR")
+        XCTAssertEqual(requests(), "1", "Disabled haptics must not request a vibration")
+        openHaptics()
+        endpoint(true)
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "30 ms")
+        tap(app, "Done")
+        app.terminate()
+        app.launchArguments = ["--ui-test"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout: 15))
+        waitForCalculator()
+        tap(app, "HOME")
+        XCTAssertEqual(requests(), "1")
+        openHaptics()
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "30 ms")
+        tap(app, "Restore Defaults")
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "8 ms")
+        tap(app, "Done")
+    }
+
     func testBusyOverclockRunsOnlyWhileBusyAndCanBeDisabled() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session", "--ui-test-benchmark"]
@@ -280,7 +334,7 @@ final class Graph89UITests: XCTestCase {
         tap(app, "Configuration Settings")
         XCTAssertTrue(app.sliders["CPU Speed"].isHittable)
         app.scrollViews.firstMatch.swipeUp()
-        XCTAssertTrue(app.buttons["Stretch mode"].isHittable)
+        XCTAssertTrue(app.sliders["Haptic Feedback"].isHittable)
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.lifetime = .keepAlways
         add(attachment)
