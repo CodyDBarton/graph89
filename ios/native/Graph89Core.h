@@ -13,6 +13,7 @@ void graph89_key(int key, int pressed);
 int graph89_screen_is_on(void);
 void graph89_wake(void);
 void graph89_copy_screen(uint8_t *pixels);
+int graph89_copy_font_templates(uint8_t *templates);
 int graph89_save(const char *path);
 int graph89_restore(const char *path);
 void graph89_stop(void);

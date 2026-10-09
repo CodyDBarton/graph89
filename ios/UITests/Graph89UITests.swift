@@ -56,6 +56,53 @@ final class Graph89UITests: XCTestCase {
         }
     }
 
+    func testSharpTextTogglePersistsAndPreservesCalculator() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout: 15))
+        tap(app, "HOME"); tap(app, "CLEAR")
+        tap(app, "K2"); tap(app, "PLUS"); tap(app, "K3"); tap(app, "ENTER")
+        tap(app, "Configuration Settings")
+        let sharp = app.switches["Sharp Text (Prototype)"]
+        for _ in 0..<4 { if sharp.isHittable { break }; app.swipeUp() }
+        XCTAssertEqual(sharp.value as? String, "0")
+        sharp.tap(); tap(app, "Done")
+        let overlay = app.otherElements["Sharp text rendering"]
+        let active = NSPredicate { _, _ in
+            let value = overlay.value as? String ?? ""
+            return value.hasPrefix("on:") && (Int(value.dropFirst(3)) ?? 0)>10
+        }
+        expectation(for: active, evaluatedWith: overlay); waitForExpectations(timeout: 10)
+        let sharpShot = XCTAttachment(screenshot: app.screenshot()); sharpShot.name="HD Home"; sharpShot.lifetime = .keepAlways; add(sharpShot)
+        // Enter derivative and integral using the calculator's own menus.
+        tap(app, "CLEAR"); tap(app, "F3"); tap(app, "ENTER")
+        for key in ["X", "^", "K3", ",", "X", ")", "ENTER"] { tap(app,key) }
+        let symbols = XCTAttachment(screenshot: app.screenshot()); symbols.name="HD derivative"; symbols.lifetime = .keepAlways; add(symbols)
+        app.terminate(); app.launchArguments=["--ui-test", "--fresh-session"]; app.launch()
+        tap(app, "Configuration Settings")
+        for _ in 0..<4 { if sharp.isHittable { break }; app.swipeUp() }
+        XCTAssertEqual(sharp.value as? String,"1", "Sharp Text must persist")
+        sharp.tap(); tap(app,"Done")
+        XCTAssertEqual(overlay.value as? String,"off:0")
+        let rawShot = XCTAttachment(screenshot: app.screenshot()); rawShot.name="Original display";rawShot.lifetime = .keepAlways;add(rawShot)
+    }
+
+    func testSharpTextFractionalZoomRendering() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session", "--ui-test-sharp-text"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout: 15))
+        tap(app,"HOME");tap(app,"CLEAR");tap(app,"F3");tap(app,"ENTER")
+        for key in ["X", "^", "K3", ",", "X", ")", "ENTER"] { tap(app,key) }
+        let overlay=app.otherElements["Sharp text rendering"]
+        let active=NSPredicate { _, _ in (overlay.value as? String ?? "").hasPrefix("on:") }
+        expectation(for:active,evaluatedWith:overlay);waitForExpectations(timeout:10)
+        let shot=XCTAttachment(screenshot:app.screenshot());shot.name="HD clean derivative";shot.lifetime = .keepAlways;add(shot)
+        tap(app,"UP");tap(app,"UP")
+        let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD clean history";selected.lifetime = .keepAlways;add(selected)
+    }
+
     private func statistics(_ app: XCUIApplication) -> [Double] {
         let text = app.staticTexts["Engine status"].value as? String ?? ""
         let values = text.split(separator: ",").compactMap { Double($0) }

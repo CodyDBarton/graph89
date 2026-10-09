@@ -49,3 +49,56 @@ void graph89_copy_screen(uint8_t *pixels) {
 int graph89_save(const char *path) { return ti68k_state_save(path); }
 int graph89_restore(const char *path) { return ti68k_state_load(path); }
 void graph89_stop(void) { ti68k_exit(); }
+
+static unsigned int font_be32(const unsigned char *p) {
+    return ((unsigned int)p[0]<<24)|((unsigned int)p[1]<<16)|((unsigned int)p[2]<<8)|p[3];
+}
+int graph89_copy_font_templates(uint8_t *templates) {
+    unsigned int pos, offsets[3];
+    unsigned char result[3 * 256 * 12];
+    int f, c, row;
+    if (!tihw.rom) return 0;
+    if ((tihw.calc_type != TI89 && tihw.calc_type != TI89t)
+        || tihw.rom_size < 2560) return 0;
+    for (pos = 0; pos + 24 <= (unsigned int)tihw.rom_size; pos += 2)
+    {
+        const unsigned char *p = tihw.rom + pos;
+        if (font_be32(p) != 0x300 || font_be32(p + 8) != 0x301
+            || font_be32(p + 16) != 0x302) continue;
+        for (f = 0; f < 3; ++f)
+        {
+            unsigned int address = font_be32(p + f * 8 + 4);
+            int stride = f == 0 ? 6 : (f == 1 ? 8 : 10);
+            if (address < tihw.rom_base) break;
+            offsets[f] = address - tihw.rom_base;
+            if (offsets[f] > (unsigned int)tihw.rom_size - 256 * stride) break;
+            /* Validate printable characters and the space before trusting a table. */
+            for (c = 32; c < 127; ++c)
+            {
+                const unsigned char *g = tihw.rom + offsets[f] + c * stride;
+                if (f == 0 && (g[0] < 1 || g[0] > 8)) break;
+                if (c == 32)
+                    for (row = (f == 0); row < stride; ++row)
+                        if (g[row]) break;
+                if (c == 32 && row < stride) break;
+            }
+            if (c != 127) break;
+        }
+        if (f != 3) continue;
+        memset(result, 0, sizeof(result));
+        for (f = 0; f < 3; ++f)
+            for (c = 0; c < 256; ++c)
+            {
+                int stride = f == 0 ? 6 : (f == 1 ? 8 : 10);
+                const unsigned char *g = tihw.rom + offsets[f] + c * stride;
+                unsigned char *out = result + (f * 256 + c) * 12;
+                out[0] = f == 0 ? g[0] : (f == 1 ? 6 : 8);
+                out[1] = f == 0 ? 5 : stride;
+                for (row = 0; row < out[1]; ++row)
+                    out[2 + row] = f == 2 ? g[row] : g[row + (f == 0)] << 1;
+            }
+        memcpy(templates, result, sizeof(result));
+        return sizeof(result);
+    }
+    return 0;
+}

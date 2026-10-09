@@ -17,12 +17,13 @@ def ref(path, kind):
     return add('PBXFileReference',lastKnownFileType=kind,path=path,sourceTree='<group>')
 
 swift=ref('App/Graph89App.swift','sourcecode.swift')
+sharpSources=[ref('App/SharpTextRecognizer.swift','sourcecode.swift'),ref('App/SharpTextView.swift','sourcecode.swift')]
 bridge=ref('App/Graph89-Bridging-Header.h','sourcecode.c.h')
-resources=[ref('../TI89Titanium_OS.89u','file'),ref('../app/src/main/assets/portrait/ti89tclassic/skin.jpg','image.jpeg'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonmask.bin','file'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonloaction.location','text')]
+resources=[ref('../app/src/main/assets/fonts/Graph89HD.ttf','file'),ref('../TI89Titanium_OS.89u','file'),ref('../app/src/main/assets/portrait/ti89tclassic/skin.jpg','image.jpeg'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonmask.bin','file'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonloaction.location','text')]
 product=add('PBXFileReference',explicitFileType='wrapper.application',path='Graph89.app',sourceTree='BUILT_PRODUCTS_DIR')
 products=add('PBXGroup',children=[product],name='Products',sourceTree='<group>')
-group=add('PBXGroup',children=[swift,bridge,*resources,products],sourceTree='<group>')
-sourcephase=add('PBXSourcesBuildPhase',buildActionMask=2147483647,files=[add('PBXBuildFile',fileRef=swift)],runOnlyForDeploymentPostprocessing=0)
+group=add('PBXGroup',children=[swift,*sharpSources,bridge,*resources,products],sourceTree='<group>')
+sourcephase=add('PBXSourcesBuildPhase',buildActionMask=2147483647,files=[add('PBXBuildFile',fileRef=r) for r in [swift,*sharpSources]],runOnlyForDeploymentPostprocessing=0)
 resourcephase=add('PBXResourcesBuildPhase',buildActionMask=2147483647,files=[add('PBXBuildFile',fileRef=r) for r in resources],runOnlyForDeploymentPostprocessing=0)
 frameworkphase=add('PBXFrameworksBuildPhase',buildActionMask=2147483647,files=[],runOnlyForDeploymentPostprocessing=0)
 nativephase=add('PBXShellScriptBuildPhase',buildActionMask=2147483647,files=[],inputPaths=[],outputPaths=[],runOnlyForDeploymentPostprocessing=0,alwaysOutOfDate=1,name='Build calculator engine',shellPath='/bin/sh',shellScript='set -eu\n/usr/bin/python3 "$SRCROOT/tools/build_native.py" --sdk "$PLATFORM_NAME"\n')

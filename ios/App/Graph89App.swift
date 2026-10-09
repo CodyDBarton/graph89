@@ -44,6 +44,7 @@ final class CalculatorController: UIViewController {
     private let engineMonitor = UILabel()
     private let hapticMonitor = UILabel()
     private let lcd = UIImageView()
+    private let hdDisplay = SharpTextView()
     private let lcdBezel = UIView()
     private let keyboard = CalculatorKeyboard()
     private var displayLink: CADisplayLink?
@@ -64,12 +65,18 @@ final class CalculatorController: UIViewController {
         lcd.layer.minificationFilter = .nearest
         lcdBezel.backgroundColor = UIColor(white: 0.2, alpha: 1)
         lcdBezel.addSubview(lcd)
+        hdDisplay.isUserInteractionEnabled = false
+        lcdBezel.addSubview(hdDisplay)
+        hdDisplay.enabled = settings.sharpText
         lcd.isAccessibilityElement = true
         lcd.accessibilityLabel = "Calculator display"
         settingsButton.accessibilityLabel = "Configuration Settings"
         settingsButton.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
         for child in [lcdBezel, keyboard, settingsButton] { view.addSubview(child) }
         if ProcessInfo.processInfo.arguments.contains("--ui-test") {
+            hdDisplay.isAccessibilityElement = true
+            hdDisplay.accessibilityIdentifier = "Sharp text rendering"
+            hdDisplay.accessibilityLabel = "Sharp text rendering"
             // Expose engine diagnostics only to the UI test runner, without visible text.
             engineMonitor.isAccessibilityElement = true
             engineMonitor.accessibilityIdentifier = "Engine status"
@@ -105,6 +112,7 @@ final class CalculatorController: UIViewController {
         lcdBezel.frame = CGRect(x: panel.minX, y: panel.minY, width: panel.width,
                                height: panel.height * screenFraction)
         lcd.frame = lcdBezel.bounds
+        hdDisplay.frame = lcdBezel.bounds
         keyboard.frame = CGRect(x: panel.minX, y: lcdBezel.frame.maxY, width: panel.width,
                                 height: panel.height - lcdBezel.frame.height)
         // Nest the badge against the physical corner, independently of the
@@ -153,6 +161,11 @@ final class CalculatorController: UIViewController {
                     return
                 }
                 self.ready = true
+                self.engine.fontTemplates { [weak self] data in
+                    guard let self else { return }
+                    self.hdDisplay.configure(data)
+                    if !self.lastPixels.isEmpty { self.hdDisplay.update(self.lastPixels) }
+                }
                 let link = CADisplayLink(target: self, selector: #selector(self.tick))
                 link.preferredFramesPerSecond = 30
                 link.add(to: .main, forMode: .common)
@@ -197,6 +210,7 @@ final class CalculatorController: UIViewController {
             guard let self else { return }
             self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock)
             self.keyHaptics.configure(duration: self.settings.hapticDuration)
+            self.hdDisplay.enabled = self.settings.sharpText
             self.view.setNeedsLayout()
         }
         let navigation = UINavigationController(rootViewController: controller)
@@ -221,6 +235,7 @@ final class CalculatorController: UIViewController {
     private func refreshScreen(_ data: Data) {
         guard data != lastPixels else { return }
         lastPixels = data
+        hdDisplay.update(data)
         guard let provider = CGDataProvider(data: data as CFData),
               let image = CGImage(width: 160, height: 100, bitsPerComponent: 8, bitsPerPixel: 8,
                                   bytesPerRow: 160, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: [],
@@ -391,6 +406,14 @@ final class CalculatorEngine {
                               busy: graph89_is_busy() != 0, normalIterations: self.normalIterations,
                               turboIterations: self.turboIterations)
             DispatchQueue.main.async { completion(frame) }
+        }
+    }
+    func fontTemplates(completion: @escaping (Data) -> Void) {
+        queue.async {
+            var bytes = [UInt8](repeating: 0, count: 3 * 256 * 12)
+            let count = graph89_copy_font_templates(&bytes)
+            let data = count == bytes.count ? Data(bytes) : Data()
+            DispatchQueue.main.async { completion(data) }
         }
     }
     func save(to path: String) -> Int32 {
@@ -687,6 +710,9 @@ final class CalculatorSettings {
     var cpuPercent: Int {
         didSet { defaults.set(cpuPercent, forKey: "cpuPercent") }
     }
+    var sharpText: Bool {
+        didSet { defaults.set(sharpText, forKey: "sharpText") }
+    }
     var overclock: Bool {
         didSet { defaults.set(overclock, forKey: "overclockWhenBusy") }
     }
@@ -703,10 +729,12 @@ final class CalculatorSettings {
             defaults.removePersistentDomain(forName: "com.codybarton.graph89.settings-tests")
         }
         defaults.register(defaults: ["cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 8])
+        sharpText = defaults.bool(forKey: "sharpText")
         cpuPercent = min(250, max(30, defaults.integer(forKey: "cpuPercent")))
         overclock = defaults.bool(forKey: "overclockWhenBusy")
         hapticDuration = min(30, max(0, defaults.integer(forKey: "hapticDuration")))
         stretchMode = StretchMode(rawValue: defaults.string(forKey: "stretchMode") ?? "") ?? .safeAspect
+        if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-sharp-text") { sharpText = true }
     }
 }
 
@@ -716,6 +744,7 @@ final class ConfigurationController: UIViewController {
     private let slider = UISlider()
     private let valueLabel = UILabel()
     private let turboSwitch = UISwitch()
+    private let sharpSwitch = UISwitch()
     private let stretchButton = UIButton(type: .system)
     private let stretchDetail = UILabel()
     private let hapticSlider = UISlider()
@@ -825,6 +854,21 @@ final class ConfigurationController: UIViewController {
         hapticDetail.textColor = .secondaryLabel
         hapticDetail.numberOfLines = 0
         stack.addArrangedSubview(hapticDetail)
+        let sharpLabel = UILabel()
+        sharpLabel.text = "Sharp Text (Prototype)"
+        sharpLabel.font = .preferredFont(forTextStyle: .headline)
+        sharpLabel.numberOfLines = 0
+        sharpSwitch.accessibilityLabel = "Sharp Text (Prototype)"
+        sharpSwitch.addTarget(self, action: #selector(sharpChanged), for: .valueChanged)
+        let sharpRow = UIStackView(arrangedSubviews: [sharpLabel, sharpSwitch])
+        sharpRow.spacing = 12
+        stack.addArrangedSubview(sharpRow)
+        let sharpDetail = UILabel()
+        sharpDetail.text = "Sharper text and mathematical symbols. Turn off to show the original calculator display."
+        sharpDetail.font = .preferredFont(forTextStyle: .subheadline)
+        sharpDetail.textColor = .secondaryLabel
+        sharpDetail.numberOfLines = 0
+        stack.addArrangedSubview(sharpDetail)
         let reset = UIButton(type: .system)
         reset.setTitle("Restore Defaults", for: .normal)
         reset.addTarget(self, action: #selector(restoreDefaults), for: .touchUpInside)
@@ -836,6 +880,7 @@ final class ConfigurationController: UIViewController {
         slider.accessibilityValue = "\(settings.cpuPercent)%"
         valueLabel.text = "\(settings.cpuPercent)%"
         turboSwitch.isOn = settings.overclock
+        sharpSwitch.isOn = settings.sharpText
         hapticSlider.value = Float(settings.hapticDuration)
         let hapticText = settings.hapticDuration == 0 ? "Disabled" : "\(settings.hapticDuration) ms"
         hapticValue.text = hapticText
@@ -866,7 +911,12 @@ final class ConfigurationController: UIViewController {
         updateControls()
         onChange?()
     }
+    @objc private func sharpChanged() {
+        settings.sharpText = sharpSwitch.isOn
+        onChange?()
+    }
     @objc private func restoreDefaults() {
+        settings.sharpText = false
         settings.cpuPercent = 100
         settings.overclock = true
         settings.stretchMode = .safeAspect

@@ -128,3 +128,19 @@ a separate saved session so it does not overwrite your calculator session.
   Xcode, do not regenerate it unless you also update the generator.
 
 The emulator libraries retain their original licenses; the Graph89 application is GPLv3.
+
+## HD text prototype
+
+The iPhone/iPad app now includes the Android HD text prototype. Open the gear → **Sharp Text (Prototype)** (scroll down in Configuration Settings). It is off by default; the saved toggle takes effect immediately and turning it off restores the original LCD.
+
+`App/SharpTextRecognizer.swift` ports the Android recognizer, including mixed font sizes, all 45 approved math/Greek font symbols, derivative d, dropdown arrows, variable-height integrals/parentheses, normal/inverse input, cursor preservation, and disabled F-menu exclusions. The native engine extracts font templates from the loaded ROM on its serial queue. The app bundles the same `app/src/main/assets/fonts/Graph89HD.ttf`; no alternate glyph designs were introduced. Font attribution is retained in that asset and its README.
+
+`App/SharpTextView.swift` clears matched glyph ink in a copy of the original 160 × 100 bitmap, draws it with nearest-neighbor scaling, then draws approved CoreText outlines at display resolution. This prevents faint bitmap remnants at fractional display scales. Unmatched graphics remain original; computation, input, aspect/stretch modes, and the calculator framebuffer are unchanged. This is still bitmap recognition, rather than ROM drawing-call interception.
+
+### Verification
+
+`python3 ios/tests/sharp-text-parity.py FONT_TEMPLATES FRAME_DIRECTORY` compares the Swift recognizer with the Android reference using private local original-screen fixtures. The 43 available actual-ROM screens have identical fresh and cached recognition results. Firmware/fonts extracted from the ROM and raw screen fixtures are kept in ignored local build output, not committed.
+
+`ios/tests/FontCheck.swift` verifies CoreText can load all 45 approved symbol outlines and that its ASCII family bounds match Android. UI tests cover the saved toggle, restoring the original display, calculator operation, derivative rendering, fractional zoom, and disabled/selected history text. Use the shared Graph89 scheme to build/run from Xcode; existing signing settings are preserved.
+
+Verified on 2026-10-09: release simulator and physical-device builds passed; saved-toggle/calculation UI tests passed on iPhone 17 and iPad 9 simulators. After the native-resolution clearing fix, fresh derivative and selected-history screenshots passed visual inspection on both devices. [iPhone screenshot](tests/screenshots/iphone-hd-derivative.png), [iPad screenshot](tests/screenshots/ipad-hd-history.png). Both app bundles contain the exact approved Android font bytes. Physical-device visual/performance confirmation remains to be done.

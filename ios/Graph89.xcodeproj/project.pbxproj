@@ -14,6 +14,9 @@
 		00000000000000000000000F /* ../app/src/main/assets/portrait/ti89tclassic/buttonloaction.location in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000006 /* ../app/src/main/assets/portrait/ti89tclassic/buttonloaction.location */; };
 		00000000000000000000001E /* UITests/Graph89UITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001B /* UITests/Graph89UITests.swift */; };
 		000000000000000000000020 /* UITests/expected-five.pgm in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001C /* UITests/expected-five.pgm */; };
+		HD0000000000000000000001 = {isa = PBXBuildFile; fileRef = HD0000000000000000000004; };
+		HD0000000000000000000002 = {isa = PBXBuildFile; fileRef = HD0000000000000000000005; };
+		HD0000000000000000000003 = {isa = PBXBuildFile; fileRef = HD0000000000000000000006; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -37,6 +40,9 @@
 		00000000000000000000001B /* UITests/Graph89UITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITests/Graph89UITests.swift; sourceTree = "<group>"; };
 		00000000000000000000001C /* UITests/expected-five.pgm */ = {isa = PBXFileReference; lastKnownFileType = file; path = "UITests/expected-five.pgm"; sourceTree = "<group>"; };
 		00000000000000000000001D /* Graph89UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = Graph89UITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		HD0000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/SharpTextRecognizer.swift; sourceTree = "<group>"; };
+		HD0000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/SharpTextView.swift; sourceTree = "<group>"; };
+		HD0000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = file; path = ../app/src/main/assets/fonts/Graph89HD.ttf; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000001 /* App/Graph89App.swift */,
+                HD0000000000000000000004, HD0000000000000000000005, HD0000000000000000000006,
 				000000000000000000000002 /* App/Graph89-Bridging-Header.h */,
 				000000000000000000000003 /* ../TI89Titanium_OS.89u */,
 				000000000000000000000004 /* ../app/src/main/assets/portrait/ti89tclassic/skin.jpg */,
@@ -145,6 +152,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				00000000000000000000000C /* ../TI89Titanium_OS.89u in Resources */,
+                HD0000000000000000000003,
 				00000000000000000000000D /* ../app/src/main/assets/portrait/ti89tclassic/skin.jpg in Resources */,
 				00000000000000000000000E /* ../app/src/main/assets/portrait/ti89tclassic/buttonmask.bin in Resources */,
 				00000000000000000000000F /* ../app/src/main/assets/portrait/ti89tclassic/buttonloaction.location in Resources */,
@@ -185,6 +193,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				00000000000000000000000A /* App/Graph89App.swift in Sources */,
+                HD0000000000000000000001, HD0000000000000000000002,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
