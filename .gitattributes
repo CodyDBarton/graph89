@@ -1,3 +1,4 @@
 # Keep the Unix build wrapper executable on macOS and Linux.
 gradlew text eol=lf
 android/build.sh text eol=lf
+android/tests/sharp-text.sh text eol=lf

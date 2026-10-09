@@ -118,6 +118,10 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		{
 			mActiveInstance.Configuration.SaveStateOnExit = sharedPreferences.getBoolean(CalculatorConfiguration.SaveStateOnExitKey, true);
 		}
+		else if (key.equals(CalculatorConfiguration.SharpTextKey))
+		{
+			mActiveInstance.Configuration.SharpText = sharedPreferences.getBoolean(CalculatorConfiguration.SharpTextKey, false);
+		}
 		else if (key.equals(CalculatorConfiguration.EnableGrayScaleKey))
 		{
 			mActiveInstance.Configuration.EnableGrayScale = sharedPreferences.getBoolean(CalculatorConfiguration.EnableGrayScaleKey, false);
@@ -229,6 +233,7 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		editor.putBoolean(CalculatorConfiguration.EnergySaveKey, mActiveInstance.Configuration.EnergySave);
 		editor.putBoolean(CalculatorConfiguration.SaveStateOnExitKey, mActiveInstance.Configuration.SaveStateOnExit);
 		editor.putBoolean(CalculatorConfiguration.EnableGrayScaleKey, mActiveInstance.Configuration.EnableGrayScale);
+		editor.putBoolean(CalculatorConfiguration.SharpTextKey, mActiveInstance.Configuration.SharpText);
 
 		editor.putInt(CalculatorConfiguration.LCDColorKey, mActiveInstance.Configuration.LCDColor);
 		editor.putInt(CalculatorConfiguration.PixelOffKey, mActiveInstance.Configuration.PixelOff);
@@ -284,6 +289,11 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 			d.removePreference(mScreenScale);
 			d.removePreference(mLcdColor);
 			d.removePreference(mOrientationList);
+		}
+
+		if (mActiveInstance.CalculatorType != CalculatorTypes.TI89 && mActiveInstance.CalculatorType != CalculatorTypes.TI89T)
+		{
+			d.removePreference(findPreference(CalculatorConfiguration.SharpTextKey));
 		}
 
 		if (mActiveInstance.Configuration.UseLCDGrid)

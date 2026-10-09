@@ -70,3 +70,29 @@ Holding a calculator key temporarily restores normal pacing, as on iOS, to keep 
 Validation (2026-10-08): ARM64 release build and release lint passed. On an isolated ARM64 Android 11 emulator, `nInt(sin(x^2),x,0,100)` showed BUSY with the engine thread at 100% CPU in a sampled interval. Tapping ON produced Error: Break. Disabling overclocking through Configuration Settings returned the busy engine to normal pacing (8% CPU in the sampled interval); ON still interrupted, and subsequent `2+3` returned `5`. These CPU samples confirm pacing behavior; they do not establish a measured S22 Ultra speed increase.
 
 Before/after emulator calculation timing: [2026-10-08 benchmark report](benchmarks/2026-10-08-overclock/README.md). Ten trials per build averaged 337.708 ms before versus 318.199 ms after for `nInt(sin(x^2),x,0,8)`: 6.13% higher throughput, or 5.78% less time. Results matched. This is an M4-hosted emulator measurement, not a Galaxy S22 Ultra measurement.
+
+## Optional sharp text prototype
+
+Build 1139 adds **Configuration Settings → Display Settings → Sharp Text (Prototype)** for TI-89/Titanium. It is off by default; unchecking it restores the original LCD. With Solid LCD and grayscale off, recognizable Home/menu text is redrawn with smooth outline fonts at its original position. Unsupported symbols and graphics remain pixels. See the [screenshots, implementation limits, and verification](sharp-text/README.md).
+
+Build 1140 preserves outline-font proportions for narrow letters and validates previously recognized glyphs across cursor/word-context changes to prevent sharp/bitmap alternation. Changed glyphs are removed immediately; cursor padding is left visible.
+
+Build 1141 replaces the substitute typeface with vector contours derived from each loaded ROM glyph. The original lowercase `i` serif and dot, letter shapes, spacing, and stroke widths are retained, with mild corner/diagonal smoothing. The original-display toggle and cursor-stability validation remain in place.
+
+Build 1142 integrates the approved TI92Pluspc-based HD font and replaces bitmap contour tracing. It uniformly fits the entire face, including full descenders and round-capital overshoot, to the ROM cells. The original LCD toggle remains available. A new cursor regression covers recognizing letters even when the cursor is already on. The bundled font retains its original attribution and license metadata.
+
+Build 1143 recognizes the small-font I within toolbar/status words, including MAIN and PrgmIO. Isolated vertical bars and menu-box borders remain original; no font outlines changed.
+
+Build 1144 extends Sharp Text recognition for isolated superscripts and paired, variable-height pretty-print parentheses. Verified `1/sin(x^2)`, nested exponents, and nested parentheses on the Android ARM64 emulator. The approved font asset is unchanged. Fraction/radical bars and unsupported symbols remain original pixels.
+
+Build 1145 fixes false small inverted-text recognition inside `e^(`. The special exponential token remains original pixels; actual inverse text remains sharp. Verified cursor blinking and inverse menu selection on the isolated Android emulator.
+
+Build 1146 fixes inverted Home-input glitches and sharpens input `^`, `(` and `)` by matching the editor's medium-font grid. Unsupported italic e remains original pixels. Verified normal/inverse `e^(2)`, cursor blinking, and regression tests.
+
+Build 1147 integrates the 44 approved special-character outlines, including italic e and the revised Greek letters, imaginary i, and symmetric infinity. Existing ASCII outlines/metrics are unchanged. Verified all 44 mappings against actual medium-font ROM templates, normal/inverse editor input, Greek/math menus, and cursor stability. Unsupported specials and dynamically assembled shapes remain original.
+
+Build 1148 fixes the pixelated `e^(` Catalog entry by accepting the complete adjacent exponential token even though it contains only one text anchor. Glyph designs are unchanged. Actual Catalog display verification, normal/inverse and exclusion regressions, and ARM64 release build/lint passed.
+
+Build 1149 recognizes variable-height Home pretty-print integrals (normal/inverse) with the existing approved shape and prevents fresh/cached fragments from overwriting disabled F-menu tiles. Derivative d and dropdown arrow candidates remain preview-only pending approval. All existing glyph designs are unchanged.
+
+Build 1150 integrates the approved derivative d at all ROM font sizes and a sharp triangular dropdown beside enabled F-key labels. Normal/inverse dropdown context, disabled/cache rejection, and all 45 approved font-symbol tests pass. Earlier glyph designs and metrics remain unchanged.

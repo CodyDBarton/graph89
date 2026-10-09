@@ -40,6 +40,13 @@
 
         <CheckBoxPreference
             android:defaultValue="false"
+            android:key="CONF_SHARP_TEXT"
+            android:title="Sharp Text (Prototype)"
+            android:summaryOn="Smooth supported Home and menu text. Requires Solid LCD with grayscale off."
+            android:summaryOff="Original calculator display" />
+
+        <CheckBoxPreference
+            android:defaultValue="false"
             android:key="CONF_ENABLE_GRAYSCALE"
             android:summary="Used in certain games/apps. Enabling it will decrease the engine&apos;s performance"
             android:title="Enable Grayscale" />

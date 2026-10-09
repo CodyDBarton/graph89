@@ -1,0 +1,317 @@
+[
+  {
+    "code": 128,
+    "label": "Small Alpha",
+    "glyph": "alpha",
+    "preview": 57728,
+    "approval": "approved"
+  },
+  {
+    "code": 129,
+    "label": "Small Beta",
+    "glyph": "beta",
+    "preview": 57729,
+    "approval": "approved"
+  },
+  {
+    "code": 130,
+    "label": "Capital Gamma",
+    "glyph": "Gamma",
+    "preview": 57730,
+    "approval": "approved"
+  },
+  {
+    "code": 131,
+    "label": "Small Gamma",
+    "glyph": "gamma",
+    "preview": 57731,
+    "approval": "approved"
+  },
+  {
+    "code": 132,
+    "label": "Capital Delta",
+    "glyph": "DeltaGreek",
+    "preview": 57732,
+    "approval": "approved"
+  },
+  {
+    "code": 133,
+    "label": "Small Delta",
+    "glyph": "delta",
+    "preview": 57733,
+    "approval": "approved"
+  },
+  {
+    "code": 134,
+    "label": "Small Epsilon",
+    "glyph": "epsilon",
+    "preview": 57734,
+    "approval": "approved"
+  },
+  {
+    "code": 135,
+    "label": "Small Zeta",
+    "glyph": "zeta",
+    "preview": 57735,
+    "approval": "approved"
+  },
+  {
+    "code": 136,
+    "label": "Small Theta",
+    "glyph": "theta",
+    "preview": 57736,
+    "approval": "approved"
+  },
+  {
+    "code": 137,
+    "label": "Small Lamda",
+    "glyph": "lambda",
+    "preview": 57737,
+    "approval": "approved"
+  },
+  {
+    "code": 138,
+    "label": "Small Xi",
+    "glyph": "xi",
+    "preview": 57738,
+    "approval": "approved"
+  },
+  {
+    "code": 139,
+    "label": "Capital Pi",
+    "glyph": "uni03a0",
+    "preview": 57739,
+    "approval": "approved"
+  },
+  {
+    "code": 140,
+    "label": "Small Pi",
+    "glyph": "uni03c0",
+    "preview": 57740,
+    "approval": "approved"
+  },
+  {
+    "code": 141,
+    "label": "Small Rho",
+    "glyph": "rho",
+    "preview": 57741,
+    "approval": "approved"
+  },
+  {
+    "code": 142,
+    "label": "Capital Sigma",
+    "glyph": "Sigma",
+    "preview": 57742,
+    "approval": "approved"
+  },
+  {
+    "code": 143,
+    "label": "Small Sigma",
+    "glyph": "sigma",
+    "preview": 57743,
+    "approval": "approved"
+  },
+  {
+    "code": 144,
+    "label": "Small Tau",
+    "glyph": "tau",
+    "preview": 57744,
+    "approval": "approved"
+  },
+  {
+    "code": 145,
+    "label": "Small Phi",
+    "glyph": "phi",
+    "preview": 57745,
+    "approval": "approved"
+  },
+  {
+    "code": 146,
+    "label": "Small Psi",
+    "glyph": "psi",
+    "preview": 57746,
+    "approval": "approved"
+  },
+  {
+    "code": 147,
+    "label": "Capital Omega",
+    "glyph": "OmegaGreek",
+    "preview": 57747,
+    "approval": "approved"
+  },
+  {
+    "code": 148,
+    "label": "Small Omega",
+    "glyph": "omega",
+    "preview": 57748,
+    "approval": "approved"
+  },
+  {
+    "code": 149,
+    "label": "Scientific E",
+    "glyph": "uniE000",
+    "preview": 57749,
+    "approval": "approved"
+  },
+  {
+    "code": 150,
+    "label": "Italic e",
+    "glyph": "uni212F",
+    "preview": 57750,
+    "approval": "approved"
+  },
+  {
+    "code": 151,
+    "label": "Imaginary i",
+    "glyph": "proposalItalicI",
+    "preview": 57751,
+    "approval": "approved"
+  },
+  {
+    "code": 152,
+    "label": "Superscript r",
+    "glyph": "uniE001",
+    "preview": 57752,
+    "approval": "approved"
+  },
+  {
+    "code": 153,
+    "label": "Transpose T",
+    "glyph": "uniE002",
+    "preview": 57753,
+    "approval": "approved"
+  },
+  {
+    "code": 154,
+    "label": "x-bar",
+    "glyph": "uniE003",
+    "preview": 57754,
+    "approval": "approved"
+  },
+  {
+    "code": 155,
+    "label": "y-bar",
+    "glyph": "uniE004",
+    "preview": 57755,
+    "approval": "approved"
+  },
+  {
+    "code": 156,
+    "label": "Less/equal",
+    "glyph": "lessequal",
+    "preview": 57756,
+    "approval": "approved"
+  },
+  {
+    "code": 157,
+    "label": "Not equal",
+    "glyph": "notequal",
+    "preview": 57757,
+    "approval": "approved"
+  },
+  {
+    "code": 158,
+    "label": "Greater/equal",
+    "glyph": "greaterequal",
+    "preview": 57758,
+    "approval": "approved"
+  },
+  {
+    "code": 159,
+    "label": "Angle",
+    "glyph": "angle",
+    "preview": 57759,
+    "approval": "approved"
+  },
+  {
+    "code": 160,
+    "label": "Ellipsis",
+    "glyph": "ellipsis",
+    "preview": 57760,
+    "approval": "approved"
+  },
+  {
+    "code": 168,
+    "label": "Square root",
+    "glyph": "radical",
+    "preview": 57768,
+    "approval": "approved"
+  },
+  {
+    "code": 176,
+    "label": "Degree",
+    "glyph": "degree",
+    "preview": 57776,
+    "approval": "approved"
+  },
+  {
+    "code": 177,
+    "label": "Plus/minus",
+    "glyph": "plusminus",
+    "preview": 57777,
+    "approval": "approved"
+  },
+  {
+    "code": 183,
+    "label": "Centered dot",
+    "glyph": "periodcentered",
+    "preview": 57783,
+    "approval": "approved"
+  },
+  {
+    "code": 189,
+    "label": "Integral",
+    "glyph": "uni222b",
+    "preview": 57789,
+    "approval": "approved"
+  },
+  {
+    "code": 190,
+    "label": "Infinity",
+    "glyph": "infinity",
+    "preview": 57790,
+    "approval": "approved"
+  },
+  {
+    "code": 22,
+    "label": "Arrow right",
+    "glyph": "arrowright",
+    "preview": 57622,
+    "approval": "approved"
+  },
+  {
+    "code": 28,
+    "label": "Union",
+    "glyph": "union",
+    "preview": 57628,
+    "approval": "approved"
+  },
+  {
+    "code": 29,
+    "label": "Intersection",
+    "glyph": "intersection",
+    "preview": 57629,
+    "approval": "approved"
+  },
+  {
+    "code": 30,
+    "label": "Subset",
+    "glyph": "propersubset",
+    "preview": 57630,
+    "approval": "approved"
+  },
+  {
+    "code": 31,
+    "label": "Element of",
+    "glyph": "element",
+    "preview": 57631,
+    "approval": "approved"
+  },
+  {
+    "code": 188,
+    "label": "Derivative d",
+    "glyph": "uniE008",
+    "preview": 57788,
+    "approval": "approved"
+  }
+]

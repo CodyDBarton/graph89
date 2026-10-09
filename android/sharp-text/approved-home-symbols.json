@@ -1,0 +1,31 @@
+{
+  "derivative": {
+    "romCode": 188,
+    "glyph": "uniE008",
+    "approval": "approved"
+  },
+  "toolbarDropdown": {
+    "character": 57856,
+    "bitmapRows": [
+      7,
+      2
+    ],
+    "width": 3,
+    "height": 2,
+    "outline": [
+      [
+        0,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        1.5,
+        2
+      ]
+    ],
+    "approval": "approved"
+  }
+}

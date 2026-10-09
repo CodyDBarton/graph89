@@ -38,6 +38,9 @@ public class CalculatorConfiguration
 	public static final String	OrientationKey			= "CONF_ORIENTATION";
 	public static final String	LCDTypeKey				= "CONF_LCD_TYPE";
 
+	public static final String SharpTextKey = "CONF_SHARP_TEXT";
+	public boolean SharpText = false;
+
 	public boolean				ZoomMode				= true;
 	public int					ScreenScale				= -1;
 	public int					Skin					= SkinDefinition.BUILD_IN_UNKNOWN;

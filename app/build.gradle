@@ -8,7 +8,7 @@ android {
         applicationId "com.Bisha.TI89EmuDonation"
         minSdkVersion 21
         targetSdkVersion 29
-        versionCode 1138
+        versionCode 1150
         versionName "1.1.3c"
     }
     // Separate packages allow comparison without replacing the paid app.

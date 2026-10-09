@@ -27,6 +27,8 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 
 import com.graph89.common.SkinBase;
+import com.graph89.common.CalculatorConfiguration;
+import com.graph89.common.CalculatorTypes;
 import com.graph89.common.Util;
 
 public class EmulatorScreen
@@ -56,6 +58,8 @@ public class EmulatorScreen
 
 	private volatile boolean						isBusy					= false;
 	private volatile boolean						isScreenOff				= false;
+	private SharpTextRenderer sharpText;
+
 	public int							CRC						= 0;
 	private int							cntr					= 0;
 
@@ -206,6 +210,11 @@ public class EmulatorScreen
 			{
 				CRC = newCRC;
 				EmulatorActivity.nativeGetEmulatedScreen(ScreenData);
+				if (useSharpText() && !isScreenOff)
+				{
+					if (sharpText == null) sharpText = new SharpTextRenderer();
+					sharpText.update(ScreenData, Zoom, mRawScreenWidth, mRawScreenHeight, mParentSkinBase.LCDPixelON);
+				}
 				EmulatorActivity.UIStateManagerObj.EmulatorViewIntstance.postInvalidate();
 			}
 		}
@@ -240,9 +249,25 @@ public class EmulatorScreen
 			Bitmap screenshotBitmap = Bitmap.createBitmap(EngineScreenParams.RawWidth * EngineScreenParams.Zoom, EngineScreenParams.RawHeight * EngineScreenParams.Zoom, Bitmap.Config.ARGB_8888);
 
 			screenshotBitmap.setPixels(data, 0, screenshotBitmap.getWidth(), 0, 0, screenshotBitmap.getWidth(), screenshotBitmap.getHeight());
+			if (useSharpText() && flags[0] == 0)
+			{
+				SharpTextRenderer renderer = new SharpTextRenderer();
+				renderer.update(data, EngineScreenParams.Zoom, EngineScreenParams.RawWidth, EngineScreenParams.RawHeight, mParentSkinBase.LCDPixelON);
+				renderer.draw(new Canvas(screenshotBitmap), new Rect(0, 0, screenshotBitmap.getWidth(), screenshotBitmap.getHeight()),
+					EngineScreenParams.RawWidth, EngineScreenParams.RawHeight, mParentSkinBase.LCDPixelON, mParentSkinBase.LCDPixelOFF);
+			}
 
 			return screenshotBitmap;
 		}
+	}
+
+	private boolean useSharpText()
+	{
+		if (EmulatorActivity.ActiveInstance == null) return false;
+		CalculatorConfiguration configuration = EmulatorActivity.ActiveInstance.Configuration;
+		int type = EmulatorActivity.ActiveInstance.CalculatorType;
+		return configuration.SharpText && !configuration.EnableGrayScale && !configuration.UseLCDGrid
+			&& (type == CalculatorTypes.TI89 || type == CalculatorTypes.TI89T);
 	}
 
 	public void drawScreen(Canvas canvas)
@@ -258,6 +283,14 @@ public class EmulatorScreen
 			else
 			{
 				canvas.drawBitmap(ScreenBitmap.BitmapObj, ScreenBitmap.BitmapRectangle, DestinationRectangle, mDrawingPaint);
+			}
+			if (sharpText != null && useSharpText() && !isScreenOff)
+			{
+				// Integer bitmap drawing uses its own height, which can differ from
+				// the skin rectangle. Keep overlay and bitmap coordinates identical.
+				Rect actual = mIntegerZoom ? new Rect(DestinationRectangle.left, DestinationRectangle.top,
+					DestinationRectangle.left + mZoomedScreenWidth, DestinationRectangle.top + mZoomedScreenHeight) : DestinationRectangle;
+				sharpText.draw(canvas, actual, mRawScreenWidth, mRawScreenHeight, mParentSkinBase.LCDPixelON, mParentSkinBase.LCDPixelOFF);
 			}
 		}
 	}
