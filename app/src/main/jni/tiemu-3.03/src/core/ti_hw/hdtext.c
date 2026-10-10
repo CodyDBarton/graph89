@@ -13,7 +13,7 @@
 #define PACKET_SIZE 12
 
 typedef struct { int x,y,font,code,attr,left,top,right,bottom,w,h,pending; } Cell;
-typedef struct { uint32_t address; int count; Cell cells[MAX_CELLS]; } Port;
+typedef struct { uint32_t address; int count,cursor_x,cursor_valid; Cell cells[MAX_CELLS]; } Port;
 typedef struct { uint32_t address; int w,h,count; uint8_t bitmap[3840]; Cell cells[MAX_CELLS]; } Saved;
 int hdtext_active;
 unsigned char hdtext_pages[65536];
@@ -23,7 +23,7 @@ static Saved saves[MAX_SAVES];
 static int next_save, ready;
 static uint32_t font_slot,port_slot,font_offsets[3];
 static uint32_t shape_sites[3],shape_finish,window_slot;
-static uint32_t draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear;
+static uint32_t draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear,rect_fill;
 
 static int byte_at(uint32_t a) {
     if(tihw.ram && a<tihw.ram_size) return tihw.ram[a];
@@ -66,7 +66,7 @@ static void initialize(void) {
     if(!font_offsets[0])return;
     draw_char=rom_call(0x1a4);draw_clip=rom_call(0x191);draw_str=rom_call(0x1a9);
     bitmap_get=rom_call(0x185);bitmap_put=rom_call(0x187);
-    scroll=rom_call(0x18b);shift=rom_call(0x18c);clear=rom_call(0x19e);
+    scroll=rom_call(0x18b);shift=rom_call(0x18c);clear=rom_call(0x19e);rect_fill=rom_call(0x189);
     /* Verified pretty-print instruction sequences, not fixed ROM addresses.
        D3/D4 contain window-relative geometry and A2 the layout record. All
        three sites must agree on the window global; unknown ROMs fall back. */
@@ -98,7 +98,7 @@ static void initialize(void) {
     }
     watch(shape_finish);
     for(int k=0;k<3;k++)watch(shape_sites[k]);
-    uint32_t addresses[]={draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear};
+    uint32_t addresses[]={draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear,rect_fill};
     for(unsigned i=0;i<sizeof(addresses)/sizeof(addresses[0]);i++)watch(addresses[i]);
 }
 static Port *port_for(uint32_t address,int create) {
@@ -162,6 +162,14 @@ void hdtext_observe(uint32_t pc) {
         Cell c={x,y,3,k==0?189:k==1?40:41,1,byte_at(win+24),byte_at(win+25),byte_at(win+26)+1,byte_at(win+27)+1,k==0?5:3,h,1};
         if(h>=7)insert(p,c);return;
     }
+    if(pc==rect_fill) {
+        uint32_t r=long_at(a);int x=byte_at(r),y=byte_at(r+1),right=byte_at(r+2),bottom=byte_at(r+3),attr=(short)word_at(a+8);
+        if(y<=92 && bottom>=85) {
+            p->cursor_valid=font==1 && address==tihw.lcd_adr && y==85 && bottom==92 && right==x+1 && x%6==0 && x+1<160 && attr==2;
+            if(p->cursor_valid)p->cursor_x=x;
+        }
+        return;
+    }
     if(pc==draw_char || pc==draw_clip) {
         Cell c=character((short)word_at(a),(short)word_at(a+2),font,word_at(a+4)&255,(short)word_at(a+(pc==draw_clip?10:6)));
         if(pc==draw_clip) {
@@ -174,7 +182,7 @@ void hdtext_observe(uint32_t pc) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+8);uint32_t s=long_at(a+4);
         for(int i=0;i<256;i++) { int c=byte_at(s+i);if(c<=0)break;insert(p,character(x,y,font,c,attr));x+=width_of(font,c); }
     } else if(pc==clear) {
-        p->count=0;
+        p->count=0;p->cursor_valid=0;
     } else if(pc==bitmap_get) {
         uint32_t r=long_at(a),buffer=long_at(a+4);int x=byte_at(r),y=byte_at(r+1),right=byte_at(r+2),bottom=byte_at(r+3);
         if(x<0 || y<0 || right<x || bottom<y || right>=240 || bottom>=128 || address!=tihw.lcd_adr)return;
@@ -270,6 +278,25 @@ int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
     int count=0;
     Port *p=port_for(tihw.lcd_adr,0);
     if(!p && tihw.lcd_adr==LCD_PORT)p=port_for(LCD_PORT,0);
+    uint8_t clean[16000];int cursor_mask=0;
+    if(hdtext_active && tihw.on_off && p && p->cursor_valid) {
+        int home=1;for(int x=0;x<160;x++)if(!pixels[83*160+x] || !pixels[93*160+x]){home=0;break;}
+        if(home) {
+            /* The medium ROM font has a blank final column. The cursor starts
+               there, XORing it and the next character's first column. Read the
+               actual rows already toggled, including snapshots mid-blink. */
+            for(int y=0;y<8;y++)if(pixels[(85+y)*160+p->cursor_x])cursor_mask|=1<<y;
+            if(cursor_mask) {
+                memcpy(clean,pixels,sizeof clean);
+                for(int y=0;y<8;y++)if(cursor_mask&(1<<y))for(int x=0;x<2;x++)clean[(85+y)*160+p->cursor_x+x]^=1;
+                pixels=clean;
+            }
+        }
+    }
+    if(cursor_mask && capacity>0) {
+        int32_t v[12]={p->cursor_x,85,4,0,cursor_mask,2,8,2,0,0,160,100};
+        memcpy(out,v,sizeof v);count=1;
+    }
     if(hdtext_active && tihw.on_off && font_offsets[0] && p)for(int i=0;i<p->count;) {
         Cell c=p->cells[i];int inv=matches(c,pixels,0)?0:matches(c,pixels,1)?1:-1;
         if(inv<0){

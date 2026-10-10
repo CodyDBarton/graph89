@@ -160,6 +160,23 @@ public final class SharpTextRecognizer {
             tables.add(table); widths.add(fontWidths);
         }
     }
+    /** Remove only a cursor positively identified by the native drawing call. */
+    public static int[] cursor(int[] packets) {
+        if(packets!=null)for(int i=0;i+11<packets.length;i+=12)
+            if(packets[i+2]==4 && packets[i]>=0 && packets[i]+2<=160 && packets[i]%6==0
+                && packets[i+1]==85 && packets[i+5]==2 && packets[i+6]==8
+                && packets[i+4]>0 && packets[i+4]<=255)
+                return new int[]{packets[i],packets[i+4]};
+        return null;
+    }
+    public static boolean[] withoutCursor(boolean[] pixels,int[] packets) {
+        int[] cursor=cursor(packets);if(cursor==null || pixels.length!=16000)return pixels;
+        boolean[] clean=pixels.clone();
+        for(int y=0;y<8;y++)if((cursor[1]&(1<<y))!=0)for(int x=0;x<2;x++) {
+            int i=(85+y)*160+cursor[0]+x;clean[i]=!clean[i];
+        }
+        return clean;
+    }
     /** Merge ROM-supplied identities over pixel-recognized fallback cells. */
     private boolean[] framePixels;
     private boolean homeFrame;

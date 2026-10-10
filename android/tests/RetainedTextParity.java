@@ -14,6 +14,7 @@ public final class RetainedTextParity {
             String s=new String(Files.readAllBytes(Paths.get(args[i]+".packets")),"UTF-8").trim();
             String[] v=s.length()==0?new String[0]:s.split("\\s+");int[] packets=new int[v.length];
             for(int j=0;j<v.length;j++)packets[j]=Integer.parseInt(v[j]);
+            p=SharpTextRecognizer.withoutCursor(p,packets);
             previous=r.recognizeStable(p,160,100,previous);
             List<String> result=new ArrayList<String>();
             for(SharpTextRecognizer.Cell c:r.retained(packets,previous)) {

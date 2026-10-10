@@ -141,6 +141,32 @@ final class Graph89UITests: XCTestCase {
         XCTAssertTrue(selectedClip.contains("inverse:3"), "All three clipped symbols must retain inversion: \(selectedClip)")
     }
 
+    func testSharpCursorBlink() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-cursor"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        for key in ["HOME","CLEAR","K1",")"] { tap(app,key) }
+        let overlay=app.otherElements["Sharp text rendering"]
+        for position in ["end","middle"] {
+            if position=="middle" { tap(app,"LEFT") }
+            var on=false,off=false,saved=false
+            for _ in 0..<20 {
+                let value=overlay.value as? String ?? ""
+                XCTAssertTrue(value.contains("entry:2"),"Adjacent input glyph lost during cursor blink: \(value)")
+                if value.contains("cursor:255") {
+                    on=true
+                    if !saved {
+                        let shot=XCTAttachment(screenshot:app.screenshot());shot.name="HD thin cursor \(position)";shot.lifetime = .keepAlways;add(shot);saved=true
+                    }
+                }
+                if value.contains("cursor:0") { off=true }
+                Thread.sleep(forTimeInterval:0.12)
+            }
+            XCTAssertTrue(on && off,"Both calculator cursor blink phases must be observed")
+        }
+    }
+
     func testSharpInverseTrig() {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-inverse-trig"]

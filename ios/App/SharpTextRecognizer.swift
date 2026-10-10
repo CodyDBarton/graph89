@@ -50,6 +50,22 @@ final class SharpTextRecognizer {
             if !widths[f].contains(w) { widths[f].append(w) }
         } }
     }
+    static func cursor(_ packets:[Int32]) -> (x:Int,mask:Int)? {
+        for i in stride(from:0,to:packets.count-packets.count%12,by:12) {
+            let x=Int(packets[i]),mask=Int(packets[i+4])
+            if packets[i+2]==4,x>=0,x+2<=160,x%6==0,packets[i+1]==85,
+               packets[i+5]==2,packets[i+6]==8,mask>0,mask<=255 { return (x,mask) }
+        }
+        return nil
+    }
+    static func withoutCursor(_ pixels:[Bool],_ packets:[Int32]) -> [Bool] {
+        guard pixels.count==16000,let cursor=cursor(packets) else { return pixels }
+        var clean=pixels
+        for y in 0..<8 where cursor.mask&(1<<y) != 0 { for x in 0..<2 {
+            let i=(85+y)*160+cursor.x+x;clean[i].toggle()
+        } }
+        return clean
+    }
     // Identity is supplied by the ROM call. No bitmap classification is used.
     private var framePixels:[Bool]=[], homeFrame=false
     private func captured(_ packets: [Int32]) -> [Cell] {

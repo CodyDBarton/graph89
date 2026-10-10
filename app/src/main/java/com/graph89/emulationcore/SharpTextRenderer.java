@@ -24,6 +24,7 @@ final class SharpTextRenderer {
     private final Paint background = new Paint();
     private boolean attemptedFonts;
     private boolean[] pixels;
+    private int[] cursor;
     private final boolean available;
     private final RectF familyBounds = new RectF();
 
@@ -68,8 +69,11 @@ final class SharpTextRenderer {
         for (int y = 0; y < height; ++y)
             for (int x = 0; x < width; ++x)
                 pixels[y * width + x] = screen[(y * zoom + zoom / 2) * width * zoom + x * zoom + zoom / 2] == onColor;
+        int[] packets=EmulatorActivity.nativeTiEmuGetRetainedText(pixels);
+        cursor=SharpTextRecognizer.cursor(packets);
+        pixels=SharpTextRecognizer.withoutCursor(pixels,packets);
         fallback = recognizer.recognizeStable(pixels, width, height, fallback);
-        cells = recognizer.retained(EmulatorActivity.nativeTiEmuGetRetainedText(pixels), fallback);
+        cells = recognizer.retained(packets, fallback);
     }
 
     private Path outline(SharpTextRecognizer.Glyph g) {
@@ -129,6 +133,12 @@ final class SharpTextRenderer {
         if (!available || pixels == null) return;
         float sx = destination.width() / (float)width, sy = destination.height() / (float)height;
         int outer = canvas.save(); canvas.clipRect(destination);
+        if(cursor!=null)for(int y=0;y<8;y++)for(int x=0;x<2;x++) {
+            int px=cursor[0]+x,py=85+y;
+            background.setColor(pixels[py*width+px]?onColor:offColor);
+            canvas.drawRect(destination.left+px*sx,destination.top+py*sy,
+                destination.left+(px+1)*sx,destination.top+(py+1)*sy,background);
+        }
         for (SharpTextRecognizer.Cell cell : cells) {
             SharpTextRecognizer.Glyph g = cell.glyph;
             if (g.character == 0 || g.maxX < g.minX) continue;
@@ -154,6 +164,12 @@ final class SharpTextRenderer {
             }
             canvas.drawPath(outline(g), ink);
             canvas.restoreToCount(saved);canvas.restoreToCount(savedClip);
+        }
+        if(cursor!=null) {
+            ink.setColor(onColor);
+            for(int y=0;y<8;y++)if((cursor[1]&(1<<y))!=0)
+                canvas.drawRect(destination.left+(cursor[0]+0.7f)*sx,destination.top+(85+y)*sy,
+                    destination.left+(cursor[0]+1.3f)*sx,destination.top+(86+y)*sy,ink);
         }
         canvas.restoreToCount(outer);
     }

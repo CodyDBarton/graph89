@@ -37,7 +37,7 @@ final class SharpTextView: UIView {
         if data == original && next == retained { return }
         retained=next
         guard data.count==160*100 else { cells=[]; setNeedsDisplay(); return }
-        original=data; pixels=data.map {$0==30}; recognize(); setNeedsDisplay()
+        original=data; pixels=SharpTextRecognizer.withoutCursor(data.map {$0==30},retained); recognize(); setNeedsDisplay()
     }
     private func recognize() {
         guard enabled, font != nil, pixels.count==160*100, let recognizer else { cells=[]; fallback=[]; accessibilityHint="retained:0"; accessibilityValue = "off:0"; return }
@@ -49,6 +49,9 @@ final class SharpTextView: UIView {
             if ProcessInfo.processInfo.arguments.contains("--ui-test-inverse-trig") {
                 let raised=cells.filter { $0.glyph.character==SharpTextRecognizer.special(180) }
                 accessibilityValue="on:\(cells.count);raised:\(raised.count),inverse:\(raised.filter { $0.inverse }.count)"
+            }
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-cursor") {
+                accessibilityValue="on:\(cells.count);entry:\(cells.filter { $0.y==85 && $0.glyph.font==1 }.count);cursor:\(SharpTextRecognizer.cursor(retained)?.mask ?? 0)"
             }
             let clipped=cells.filter { $0.y<$0.clipTop || $0.y+$0.glyph.height>$0.clipBottom || $0.x<$0.clipLeft || $0.x+$0.glyph.width>$0.clipRight }
             if ProcessInfo.processInfo.arguments.contains("--ui-test-clipped-math") { accessibilityValue="on:\(cells.count);clipped:\(clipped.count),math:\(clipped.filter { $0.glyph.dynamic }.count),inverse:\(clipped.filter { $0.glyph.dynamic && $0.inverse }.count)" }
@@ -98,7 +101,7 @@ final class SharpTextView: UIView {
         guard enabled, let context=UIGraphicsGetCurrentContext(), pixels.count==160*100 else { return }
         // Clear in native pixel coordinates before scaling. Erasing separately
         // above a UIImageView can leave subpixel fragments at fractional zoom.
-        var cleaned = [UInt8](original)
+        var cleaned = pixels.map { UInt8($0 ? 30:210) }
         for cell in cells {
             let g=cell.glyph
             for y in g.minY...g.maxY { for x in g.minX...g.maxX where cell.x+x>=cell.clipLeft && cell.x+x<cell.clipRight && cell.y+y>=cell.clipTop && cell.y+y<cell.clipBottom {
@@ -126,6 +129,12 @@ final class SharpTextView: UIView {
             context.addPath(clip);context.clip(using:.evenOdd)
             context.setFillColor(UIColor(white:(cell.inverse ? 210:30)/255.0,alpha:1).cgColor)
             context.addPath(path);context.fillPath();context.restoreGState()
+        }
+        if let cursor=SharpTextRecognizer.cursor(retained) {
+            context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor)
+            for y in 0..<8 where cursor.mask&(1<<y) != 0 {
+                context.fill(CGRect(x:Double(cursor.x)+0.7,y:Double(85+y),width:0.6,height:1))
+            }
         }
         context.restoreGState()
     }

@@ -94,10 +94,23 @@ static void observe(uint32_t pc) {
     }
 }
 #ifdef GRAPH89_DRAW_TRACE
-static unsigned mid_draw_probes;
+static unsigned mid_draw_probes,cursor_probes;
+static int probe_cursor;
 static void sample_during_drawing(uint32_t pc) {
     if(!pages[(pc&0xffffff)>>8])return;
     uint32_t pixel=0;for(unsigned i=0;i<N_CALLS;i++)if(calls[i].id==0x1a8){pixel=calls[i].address;break;}
+    if(probe_cursor && (!strcmp(phase,"cursor-end") || !strcmp(phase,"cursor-middle"))) {
+        uint32_t line=0;for(unsigned i=0;i<N_CALLS;i++)if(calls[i].id==0x1a7){line=calls[i].address;break;}
+        uint32_t a=m68k_areg(regs,7)+4;
+        if(pc==line && word_at(a+2)>=85 && word_at(a+2)<=92 && word_at(a+4)==word_at(a)+1 && word_at(a+8)==2) {
+            uint8_t screen[16000];int32_t packets[1024*12];graph89_copy_screen(screen);
+            for(int i=0;i<16000;i++)screen[i]=screen[i]==30;
+            int n=hdtext_copy_locked(screen,packets,1024),found=0;
+            for(int i=0;i<n;i++)if(packets[i*12+1]==85 && packets[i*12+2]==1)found++;
+            if(found!=4){fprintf(stderr,"Mid-cursor drawing lost an input character: %d\n",found);exit(1);}
+            cursor_probes++;
+        }
+    }
     if(pc!=pixel || (strcmp(phase,"clipped-math-pretty") && strcmp(phase,"tall-integral-pretty")))return;
     uint8_t pixels[16000];int32_t packets[1024*12];graph89_copy_screen(pixels);
     for(int i=0;i<16000;i++)pixels[i]=pixels[i]==30;
@@ -214,6 +227,16 @@ int main(int argc,char **argv) {
     phase="inverse-trig-input";press(TIKEY_CLEAR);press(TIKEY_DIAMOND);press(TIKEY_Z);text("x)");snapshot(argv[2],"16d-inverse-trig-input");
     phase="inverse-trig-pretty";press(TIKEY_ENTER1);run(4000000);snapshot(argv[2],"16e-inverse-trig-pretty");
     phase="inverse-trig-selected";press(TIKEY_UP);press(TIKEY_UP);snapshot(argv[2],"16f-inverse-trig-selected");press(TIKEY_ESCAPE);
+    phase="cursor-end";press(TIKEY_CLEAR);text("WM1)");
+#ifdef GRAPH89_DRAW_TRACE
+    probe_cursor=1;
+#endif
+    for(int i=0;i<20;i++){char name[64];run(200000);snprintf(name,sizeof name,"18-cursor-end-%02d",i);snapshot(argv[2],name);}
+    phase="cursor-middle";press(TIKEY_LEFT);
+    for(int i=0;i<20;i++){char name[64];run(200000);snprintf(name,sizeof name,"19-cursor-middle-%02d",i);snapshot(argv[2],name);}
+#ifdef GRAPH89_DRAW_TRACE
+    probe_cursor=0;
+#endif
     phase="apps-menu";press(TIKEY_APPS);snapshot(argv[2],"17-apps-menu");
 #ifdef GRAPH89_DRAW_TRACE
     graph89_instruction_trace=NULL;
@@ -222,6 +245,8 @@ int main(int argc,char **argv) {
 #ifdef GRAPH89_DRAW_TRACE
         if(mid_draw_probes<10){fprintf(stderr,"Missing mid-drawing sampling coverage\n");return 1;}
         printf("%u frame validations during unfinished shape cap drawing passed\n",mid_draw_probes);
+        if(cursor_probes<16){fprintf(stderr,"Missing mid-cursor coverage\n");return 1;}
+        printf("%u frame validations during XOR cursor redraw passed\n",cursor_probes);
 #endif
         uint8_t pixels[16000];graph89_copy_screen(pixels);int32_t cells[1024*12];
         int n=graph89_copy_retained_text(pixels,cells,1024);

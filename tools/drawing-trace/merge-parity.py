@@ -66,3 +66,16 @@ for name in ['16d-inverse-trig-input','16e-inverse-trig-pretty','16f-inverse-tri
     for c in wanted:
         assert any(r[0]==c[0] and r[1]==c[1] and r[2]==c[2] and r[3]==57780 and r[4]==c[4] for r in rows),(name,c)
 print('Actual-ROM inverse trig raised -1 retained in input, pretty print and selected history.')
+
+for prefix in ['18-cursor-end','19-cursor-middle']:
+    names=[n for n in by_name if n.startswith(prefix)]
+    if not names: continue
+    masks=set()
+    for name in names:
+        packets=json.loads((frames/(name+'.cells.json')).read_text())
+        masks.add(next((c[4] for c in packets if c[2]==4),0))
+        rows=[list(map(int,c.split(','))) for c in by_name[name].split(';') if c]
+        for x,ch in [(1,87),(7,77),(13,49),(19,41)]:
+            assert any(r[0]==x and r[1]==85 and r[2]==1 and r[3]==ch and r[4]==0 for r in rows),(name,x,ch)
+    assert 0 in masks and 255 in masks, (prefix,masks)
+print('Actual-ROM cursor on/off cycles preserve all entry glyphs at end and middle.')

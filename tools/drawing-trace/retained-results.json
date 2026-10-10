@@ -130,7 +130,7 @@
     "state_restore_clears_retained_cache": true,
     "italic_e_captured_editor_pretty_catalog": true,
     "derivative_d_captured": true,
-    "Android_iOS_merge_parity_frames": 27,
+    "Android_iOS_merge_parity_frames": 67,
     "normal_and_inverse_25_row_integral_and_parentheses": true,
     "iPhone17_and_iPad9_tall_math_UI_tests": true,
     "Catalog_conversion_triangle_Rx_Ry_native_identities": true,
@@ -143,12 +143,16 @@
     "iPhone17_and_iPad9_clipped_math_UI_tests": true,
     "inverse_trig_input_pretty_selected_native_identity": true,
     "iPhone17_inverse_trig_UI_test": true,
-    "previous_font_outlines_and_advances_unchanged": true
+    "previous_font_outlines_and_advances_unchanged": true,
+    "cursor_end_and_middle_on_off_frames": 40,
+    "mid_cursor_redraw_validation_probes": 64,
+    "iPhone17_cursor_blink_UI_test": true
   },
   "font_outlines_changed": true,
   "font_outlines_added": [
     "graph89Inverse0",
     "graph89Inverse1",
     "graph89Inverse2"
-  ]
+  ],
+  "cursor_width_LCD_pixels": 0.6
 }
