@@ -10,6 +10,8 @@ final class SharpTextView: UIView {
     private var recognizer: SharpTextRecognizer?
     private var pixels: [Bool]=[]
     private var original = Data()
+    private var retained: [Int32]=[]
+    private var fallback: [SharpTextRecognizer.Cell]=[]
     private var cells: [SharpTextRecognizer.Cell]=[]
     private var font: CTFont?
     private var family = CGRect.null
@@ -28,16 +30,29 @@ final class SharpTextView: UIView {
     required init?(coder:NSCoder) { fatalError("init(coder:) is not supported") }
     func configure(_ data: Data) {
         recognizer = data.count==3*256*12 ? SharpTextRecognizer(Array(data)) : nil
-        cells=[]; paths=[:]; recognize(); setNeedsDisplay()
+        cells=[]; fallback=[]; paths=[:]; recognize(); setNeedsDisplay()
     }
-    func update(_ data: Data) {
+    func update(_ data: Data, retained packets: [Int32]? = nil) {
+        let next = packets ?? retained
+        if data == original && next == retained { return }
+        retained=next
         guard data.count==160*100 else { cells=[]; setNeedsDisplay(); return }
         original=data; pixels=data.map {$0==30}; recognize(); setNeedsDisplay()
     }
     private func recognize() {
-        guard enabled, font != nil, pixels.count==160*100, let recognizer else { cells=[]; accessibilityValue = "off:0"; return }
-        cells=recognizer.stable(pixels,cells)
-        if ProcessInfo.processInfo.arguments.contains("--ui-test") { accessibilityValue = "on:\(cells.count)" }
+        guard enabled, font != nil, pixels.count==160*100, let recognizer else { cells=[]; fallback=[]; accessibilityHint="retained:0"; accessibilityValue = "off:0"; return }
+        fallback=recognizer.stable(pixels,fallback)
+        cells=recognizer.retained(retained,fallback:fallback)
+        if ProcessInfo.processInfo.arguments.contains("--ui-test") {
+            accessibilityIdentifier="retained:\(recognizer.retainedCount(retained))"
+            accessibilityValue = "on:\(cells.count)"
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-inverse-trig") {
+                let raised=cells.filter { $0.glyph.character==SharpTextRecognizer.special(180) }
+                accessibilityValue="on:\(cells.count);raised:\(raised.count),inverse:\(raised.filter { $0.inverse }.count)"
+            }
+            let clipped=cells.filter { $0.y<$0.clipTop || $0.y+$0.glyph.height>$0.clipBottom || $0.x<$0.clipLeft || $0.x+$0.glyph.width>$0.clipRight }
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-clipped-math") { accessibilityValue="on:\(cells.count);clipped:\(clipped.count),math:\(clipped.filter { $0.glyph.dynamic }.count),inverse:\(clipped.filter { $0.glyph.dynamic && $0.inverse }.count)" }
+        }
     }
     private func glyphPath(_ code:Int,_ face:CTFont)->CGPath? {
         var ch=UniChar(code), glyph:CGGlyph=0
@@ -48,6 +63,19 @@ final class SharpTextView: UIView {
         let id=ObjectIdentifier(g); if let path=paths[id] { return path }
         if g.character==SharpTextRecognizer.dropdown {
             let path=CGMutablePath();path.move(to:.zero);path.addLine(to:CGPoint(x:3,y:0));path.addLine(to:CGPoint(x:1.5,y:2));path.closeSubpath();paths[id]=path;return path
+        }
+        if g.character==SharpTextRecognizer.special(18) {
+            let path=CGMutablePath()
+            path.move(to:CGPoint(x:CGFloat(g.minX),y:CGFloat(g.minY)))
+            path.addLine(to:CGPoint(x:CGFloat(g.maxX+1),y:CGFloat(g.minY+g.maxY+1)/2))
+            path.addLine(to:CGPoint(x:CGFloat(g.minX),y:CGFloat(g.maxY+1)))
+            path.closeSubpath();paths[id]=path;return path
+        }
+        if g.character==SharpTextRecognizer.special(180) {
+            // Match the approved size-specific composition at 200 units/pixel.
+            guard let font, let path=glyphPath(0xe300+g.font,font) else { return nil }
+            var matrix=CGAffineTransform(a:1.0/200,b:0,c:0,d:-1.0/200,tx:0,ty:10)
+            let transformed=path.copy(using:&matrix);paths[id]=transformed;return transformed
         }
         guard let font, let path=glyphPath(g.character,font) else { return nil }
         let b=path.boundingBoxOfPath
@@ -73,7 +101,7 @@ final class SharpTextView: UIView {
         var cleaned = [UInt8](original)
         for cell in cells {
             let g=cell.glyph
-            for y in g.minY...g.maxY { for x in g.minX...g.maxX where cell.x+x<160 {
+            for y in g.minY...g.maxY { for x in g.minX...g.maxX where cell.x+x>=cell.clipLeft && cell.x+x<cell.clipRight && cell.y+y>=cell.clipTop && cell.y+y<cell.clipBottom {
                 cleaned[(cell.y+y)*160+cell.x+x] = cell.inverse ? 30:210
             } }
         }
@@ -87,9 +115,11 @@ final class SharpTextView: UIView {
         context.draw(image,in:CGRect(x:0,y:0,width:160,height:100));context.restoreGState()
         for cell in cells {
             let g=cell.glyph; guard g.character != 0, let path=outline(g) else { continue }
-            context.saveGState();context.translateBy(x:CGFloat(cell.x),y:CGFloat(cell.y))
+            context.saveGState()
+            context.clip(to:CGRect(x:cell.clipLeft,y:cell.clipTop,width:cell.clipRight-cell.clipLeft,height:cell.clipBottom-cell.clipTop))
+            context.translateBy(x:CGFloat(cell.x),y:CGFloat(cell.y))
             let clip=CGMutablePath();clip.addRect(CGRect(x:0,y:0,width:g.width,height:g.height))
-            for y in 0..<g.height { for x in 0..<min(g.width,160-cell.x) {
+            for y in max(0,cell.clipTop-cell.y)..<min(g.height,cell.clipBottom-cell.y) { for x in max(0,cell.clipLeft-cell.x)..<min(g.width,cell.clipRight-cell.x) {
                 if x>=g.minX && x<=g.maxX && y>=g.minY && y<=g.maxY { continue }
                 if pixels[(cell.y+y)*160+cell.x+x] != cell.inverse { clip.addRect(CGRect(x:x,y:y,width:1,height:1)) }
             } }

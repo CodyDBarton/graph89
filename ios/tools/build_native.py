@@ -14,8 +14,9 @@ JNI = ROOT / 'app/src/main/jni'
 parser = argparse.ArgumentParser()
 parser.add_argument('--sdk', choices=['macosx', 'iphoneos', 'iphonesimulator'], default='macosx')
 parser.add_argument('--sanitize', action='store_true')
+parser.add_argument('--draw-trace', action='store_true', help='Enable the diagnostic instruction observer (no effect in normal builds)')
 args = parser.parse_args()
-out = ROOT / 'ios/build' / (args.sdk + ('-asan' if args.sanitize else ''))
+out = ROOT / 'ios/build' / (args.sdk + ('-asan' if args.sanitize else '') + ('-draw-trace' if args.draw_trace else ''))
 out.mkdir(parents=True, exist_ok=True)
 overlay = out / 'include'
 overlay.mkdir(exist_ok=True)
@@ -62,6 +63,7 @@ includes += [ROOT/'ios/native']
 cc = subprocess.check_output(['xcrun','--sdk',args.sdk,'--find','clang'],text=True).strip()
 sdk = subprocess.check_output(['xcrun','--sdk',args.sdk,'--show-sdk-path'],text=True).strip()
 flags=['-isysroot',sdk,'-arch','arm64','-std=gnu99','-O2','-g','-fcommon','-fno-strict-aliasing','-Wno-deprecated-declarations','-Wno-incompatible-pointer-types','-Wno-int-conversion','-Wno-format','-Wno-pointer-to-int-cast','-Wno-int-to-pointer-cast','-Wno-typedef-redefinition','-Wno-macro-redefined','-Wno-incompatible-function-pointer-types','-DDISABLE_VISIBILITY','-DHAVE_CONFIG_H','-DDEBUGGER','-DNO_GDB','-DNO_SOUND','-DSTDC','-DGLIB_COMPILATION','-DTICONV_EXPORTS','-DNO_CABLE_BLK','-DNO_CABLE_GRY','-DNO_CABLE_PAR','-DNO_CABLE_SLV','-DNO_CABLE_VTI','-DNO_CABLE_TIE','-DLIBDIR=""','-DGLIB_LOCALE_DIR=""']
+if args.draw_trace: flags += ['-DGRAPH89_DRAW_TRACE']
 if args.sanitize: flags += ['-fsanitize=address','-fno-omit-frame-pointer']
 if args.sdk == 'iphoneos': flags += ['-miphoneos-version-min=16.0']
 elif args.sdk == 'iphonesimulator': flags += ['-mios-simulator-version-min=16.0']

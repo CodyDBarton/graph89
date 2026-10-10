@@ -98,9 +98,77 @@ final class Graph89UITests: XCTestCase {
         let overlay=app.otherElements["Sharp text rendering"]
         let active=NSPredicate { _, _ in (overlay.value as? String ?? "").hasPrefix("on:") }
         expectation(for:active,evaluatedWith:overlay);waitForExpectations(timeout:10)
+        XCTAssertGreaterThan(Int(overlay.identifier.dropFirst("retained:".count)) ?? 0, 10, "Real ROM drawing calls must reach the rendered layer")
         let shot=XCTAttachment(screenshot:app.screenshot());shot.name="HD clean derivative";shot.lifetime = .keepAlways;add(shot)
         tap(app,"UP");tap(app,"UP")
         let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD clean history";selected.lifetime = .keepAlways;add(selected)
+    }
+
+    func testSharpTallMathSelection() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        for key in ["HOME","CLEAR","F3","DOWN","ENTER","K1","DIVIDE","(","K1","PLUS","X","^","K2",
+                    ")",",","X",",","K0",",","K1",")","ENTER"] { tap(app,key) }
+        Thread.sleep(forTimeInterval:1)
+        let normal=XCTAttachment(screenshot:app.screenshot());normal.name="HD tall integral and parentheses normal";normal.lifetime = .keepAlways;add(normal)
+        let before=pixels(app)
+        tap(app,"UP");tap(app,"UP")
+        XCTAssertNotEqual(before,pixels(app),"History selection must invert the expression")
+        let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD tall integral and parentheses inverted";selected.lifetime = .keepAlways;add(selected)
+    }
+
+    func testSharpClippedMath() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-clipped-math"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        for key in ["HOME","CLEAR","F3","DOWN","ENTER"] { tap(app,key) }
+        for _ in 0..<6 { for key in ["K1","DIVIDE","("] { tap(app,key) } }
+        for key in ["K1","PLUS","X","^","K2"] { tap(app,key) }
+        for _ in 0..<6 { tap(app,")") }
+        for key in [",","X",",","K0",",","K1",")","ENTER"] { tap(app,key) }
+        Thread.sleep(forTimeInterval:1)
+        let normalClip=app.otherElements["Sharp text rendering"].value as? String ?? ""
+        XCTAssertTrue(normalClip.contains("math:3"), "All three full-height symbols must survive clipping: \(normalClip)")
+        let normal=XCTAttachment(screenshot:app.screenshot());normal.name="HD clipped math normal";normal.lifetime = .keepAlways;add(normal)
+        tap(app,"UP");tap(app,"UP")
+        let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD clipped math inverted";selected.lifetime = .keepAlways;add(selected)
+        let overlay=app.otherElements["Sharp text rendering"]
+        XCTAssertGreaterThan(Int(overlay.identifier.dropFirst("retained:".count)) ?? 0,10)
+        let selectedClip=overlay.value as? String ?? ""
+        XCTAssertTrue(selectedClip.contains("inverse:3"), "All three clipped symbols must retain inversion: \(selectedClip)")
+    }
+
+    func testSharpInverseTrig() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-inverse-trig"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        for key in ["HOME","CLEAR","DIAMOND","Z","X",")"] { tap(app,key) }
+        let overlay=app.otherElements["Sharp text rendering"]
+        XCTAssertTrue((overlay.value as? String ?? "").contains("raised:1"), "Inverse trig input must have a sharp raised -1")
+        tap(app,"ENTER");Thread.sleep(forTimeInterval:1)
+        XCTAssertTrue((overlay.value as? String ?? "").contains("raised:3"), "Input, pretty-printed command and result must all be sharp")
+        let normal=XCTAttachment(screenshot:app.screenshot());normal.name="HD inverse trig normal";normal.lifetime = .keepAlways;add(normal)
+        tap(app,"UP");tap(app,"UP")
+        XCTAssertTrue((overlay.value as? String ?? "").contains("inverse:1"), "Selected history must retain the raised -1 in inverted text")
+        let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD inverse trig inverted";selected.lifetime = .keepAlways;add(selected)
+    }
+
+    func testSharpCatalogTriangle() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        for key in ["HOME","CLEAR","CATALOG","MINUS"] { tap(app,key) }
+        let normal=XCTAttachment(screenshot:app.screenshot());normal.name="HD Catalog conversion triangles";normal.lifetime = .keepAlways;add(normal)
+        // Catalog down navigation eventually selects the two P-triangle entries.
+        for _ in 0..<4 { tap(app,"DOWN") }
+        let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD Catalog selected triangle";selected.lifetime = .keepAlways;add(selected)
+        tap(app,"ENTER")
+        let input=XCTAttachment(screenshot:app.screenshot());input.name="HD conversion triangle input";input.lifetime = .keepAlways;add(input)
     }
 
     private func statistics(_ app: XCUIApplication) -> [Double] {

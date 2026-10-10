@@ -135,7 +135,7 @@ The iPhone/iPad app now includes the Android HD text prototype. Open the gear �
 
 `App/SharpTextRecognizer.swift` ports the Android recognizer, including mixed font sizes, all 45 approved math/Greek font symbols, derivative d, dropdown arrows, variable-height integrals/parentheses, normal/inverse input, cursor preservation, and disabled F-menu exclusions. The native engine extracts font templates from the loaded ROM on its serial queue. The app bundles the same `app/src/main/assets/fonts/Graph89HD.ttf`; no alternate glyph designs were introduced. Font attribution is retained in that asset and its README.
 
-`App/SharpTextView.swift` clears matched glyph ink in a copy of the original 160 × 100 bitmap, draws it with nearest-neighbor scaling, then draws approved CoreText outlines at display resolution. This prevents faint bitmap remnants at fractional display scales. Unmatched graphics remain original; computation, input, aspect/stretch modes, and the calculator framebuffer are unchanged. This is still bitmap recognition, rather than ROM drawing-call interception.
+`App/SharpTextView.swift` clears matched glyph ink in a copy of the original 160 × 100 bitmap, draws it with nearest-neighbor scaling, then draws approved CoreText outlines at display resolution. This prevents faint bitmap remnants at fractional display scales. Unmatched graphics remain original; computation, input, aspect/stretch modes, and the calculator framebuffer are unchanged. The shared native retained-text layer now captures ROM character identities, positions, and live font state before rasterization. Validated captured characters take priority over the bitmap recognizer; unsupported shapes and drawing paths keep its existing fallback. Bitmap save/restore, inversion, cursor padding, clearing and state loading are handled without changing the ROM or approved font. See [retained-text details](../tools/drawing-trace/README.md).
 
 ### Verification
 
@@ -144,3 +144,21 @@ The iPhone/iPad app now includes the Android HD text prototype. Open the gear �
 `ios/tests/FontCheck.swift` verifies CoreText can load all 45 approved symbol outlines and that its ASCII family bounds match Android. UI tests cover the saved toggle, restoring the original display, calculator operation, derivative rendering, fractional zoom, and disabled/selected history text. Use the shared Graph89 scheme to build/run from Xcode; existing signing settings are preserved.
 
 Verified on 2026-10-09: release simulator and physical-device builds passed; saved-toggle/calculation UI tests passed on iPhone 17 and iPad 9 simulators. After the native-resolution clearing fix, fresh derivative and selected-history screenshots passed visual inspection on both devices. [iPhone screenshot](tests/screenshots/iphone-hd-derivative.png), [iPad screenshot](tests/screenshots/ipad-hd-history.png). Both app bundles contain the exact approved Android font bytes. Physical-device visual/performance confirmation remains to be done.
+
+### Tall mathematical shapes and selection
+
+Tall parentheses are checked in both normal and inverted text, with pairs required to have matching height and polarity. After native character identities are merged, a second exact-shape pass uses those character positions to validate integrals and parentheses. This avoids rejecting valid selected expressions because a background border is clipped, or because limits/fractions separate the integrand from the integral stem. Complete caps and stems remain mandatory; clipped or altered shapes stay original. Shape detection can replace conflicting pixel-recognized fragments but cannot overwrite verified native characters, editor text, disabled toolbar tiles or graph areas. Approved outlines are unchanged.
+
+Actual-ROM checks cover a 25-row integral and paired parentheses in normal and inverted history selection. Java/Swift behavior matches on all 21 captured screens; existing graph, clearing, changed-cap and disabled-menu regressions pass.
+
+Visual UI checks pass on iPhone 17 and iPad 9: [normal tall math](tests/screenshots/iphone-hd-tall-normal.png), [inverted tall math](tests/screenshots/iphone-hd-tall-inverted.png), [iPad selection](tests/screenshots/ipad-hd-tall-inverted.png).
+
+### Approved Catalog triangle
+
+ROM character 18 now uses the approved filled right-pointing triangle in both renderers, including normal/inverse conversion commands and the Catalog selection pointer. Its vertices use the original glyph ink bounds; the medium-font path is `(1,1) → (4,3.5) → (1,6)`. Character advance and padding stay unchanged. It is drawn as a vector path, separately from the shafted arrow (ROM code 22); the TTF and earlier glyph designs are unchanged.
+
+Clipped text and tall math (2026-10-10): the retained layer now preserves partially visible ROM characters and captures integral/parenthesis geometry before clipping. The approved outlines are drawn at their full original height and clipped to the calculator's own viewport, including inverted selections. Font designs are unchanged. Unknown internal ROM instruction layouts retain pixel fallback.
+
+Clipped-math verification passed on iPhone 17 and iPad 9 simulators, including normal/inverse 80-row shapes. The iPad test exposed mid-drawing validation removing unfinished symbols; retaining pending geometry until the ROM continuation fixes it. [iPhone normal](tests/screenshots/iphone-hd-clipped-normal.png), [iPad inverted](tests/screenshots/ipad-hd-clipped-inverted.png).
+
+Inverse trig raised −1 (Android build 1152): ROM character 180 now uses the approved size-specific composition of the existing minus and numeral 1. The three new font outlines use 200 units per LCD pixel and a baseline at y=10; both renderers use the same fixed transform, preserving the approved preview in normal and inverted text. Reproduce these additions with `android/sharp-text/build-inverse-trig-font.py INPUT_TTF OUTPUT_TTF` after the other approved font integration steps. Earlier outlines and advances remain unchanged.

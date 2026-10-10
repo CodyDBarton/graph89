@@ -5,7 +5,7 @@ import Foundation
 final class SharpTextRecognizer {
     static let dropdown = 0xe200
     static func special(_ code: Int) -> Int {
-        let approved = [22,28,29,30,31,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,168,176,177,183,188,189,190]
+        let approved = [18,22,28,29,30,31,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,168,176,177,180,183,188,189,190]
         return approved.contains(code) ? 0xe100 + code : 0
     }
     final class Glyph {
@@ -20,11 +20,15 @@ final class SharpTextRecognizer {
             ink=n; minX=left; maxX=right; minY=top; maxY=bottom
         }
     }
-    struct Cell { let x: Int, y: Int, inverse: Bool, glyph: Glyph }
+    struct Cell {
+        let x:Int,y:Int,inverse:Bool,glyph:Glyph
+        var clipLeft=0,clipTop=0,clipRight=160,clipBottom=100
+    }
     struct Run {
         var cells: [Cell]=[]; var letters=0, ink=0, font=0
         var text: String { String(cells.compactMap { UnicodeScalar($0.glyph.character).map(Character.init) }) }
     }
+    private var capturedGlyphs: [[Glyph?]] = Array(repeating: Array(repeating: nil, count: 256), count: 3)
     private var tables: [[UInt64:[Glyph]]] = Array(repeating: [:], count: 3)
     private var widths: [[Int]] = Array(repeating: [], count: 3)
     private var labels: [Int:Glyph]=[:], dynamic: [String:Glyph]=[:], labelIs: [ObjectIdentifier:Glyph]=[:]
@@ -40,10 +44,53 @@ final class SharpTextRecognizer {
             let rows=(0..<h).map { Int(bytes[off+2+$0]) >> (8-w) }
             let ch = f==0 && (c==73 || c==124) ? 0 : approved
             let g=Glyph(f,w,h,ch,rows); if g.ink==0 { continue }
+            capturedGlyphs[f][c] = ch == approved ? g : Glyph(f,w,h,approved,rows)
             if f==0 && (c==70 || (49...56).contains(c)) { labels[c]=g }
             tables[f][key(w,rows),default:[]].append(g)
             if !widths[f].contains(w) { widths[f].append(w) }
         } }
+    }
+    // Identity is supplied by the ROM call. No bitmap classification is used.
+    private var framePixels:[Bool]=[], homeFrame=false
+    private func captured(_ packets: [Int32]) -> [Cell] {
+        var direct: [Cell] = []
+        for i in stride(from:0,to:packets.count-packets.count%12,by:12) {
+            let x=Int(packets[i]),y=Int(packets[i+1]),f=Int(packets[i+2]),c=Int(packets[i+3])
+            guard (0...3).contains(f),(0..<256).contains(c),packets[i+7] != 3 else { continue }
+            var glyph:Glyph?
+            if f<3 { glyph=capturedGlyphs[f][c] }
+            else {
+                let h=Int(packets[i+6]),w=c==189 ? 5:3
+                guard (7...512).contains(h),[189,40,41].contains(c),Int(packets[i+5])==w else { continue }
+                var rows=Array(repeating:c==189 ? 4:c==40 ? 4:1,count:h)
+                rows[0]=c==189 ? 2:c==40 ? 1:4;rows[h-1]=rows[0];rows[1]=2;rows[h-2]=2
+                if c==189 { rows[1]=5;rows[h-2]=20;rows[h-1]=8 }
+                glyph=cached("native:\(c):\(h)",rows,w,c==189 ? Self.special(189):c)
+            }
+            let l=Int(packets[i+8]),t=Int(packets[i+9]),r=Int(packets[i+10]),b=Int(packets[i+11])
+            guard let g=glyph,g.width==Int(packets[i+5]),g.height==Int(packets[i+6]),
+                  l>=0,t>=0,r<=160,b<=100,l<r,t<b,x+g.width>l,x<r,y+g.height>t,y<b else { continue }
+            direct.append(Cell(x:x,y:y,inverse:packets[i+4] != 0,glyph:g,clipLeft:l,clipTop:t,clipRight:r,clipBottom:b))
+        }
+        return direct
+    }
+    func retainedCount(_ packets: [Int32]) -> Int { captured(packets).count }
+    func retained(_ packets: [Int32], fallback: [Cell]) -> [Cell] {
+        let direct=captured(packets)
+        let result = direct + fallback.filter { c in !direct.contains { d in
+            c.x < min(d.clipRight,d.x+d.glyph.width) && max(d.clipLeft,d.x) < c.x+c.glyph.width && c.y < min(d.clipBottom,d.y+d.glyph.height) && max(d.clipTop,d.y) < c.y+c.glyph.height
+        } }
+        guard framePixels.count==16000,homeFrame,!graph else { return result }
+        var occupied=blocked
+        if input>=0 { for y in input..<input+8 { for x in 0..<160 { occupied[y*160+x]=true } } }
+        for c in direct { occupy(c,&occupied,160) }
+        var shaped=result
+        integrals(framePixels,160,100,&occupied,result,&shaped,true)
+        parentheses(framePixels,160,100,&occupied,&shaped)
+        let shapes=Array(shaped.dropFirst(result.count))
+        return result.filter { c in !shapes.contains { d in
+            c.x<d.x+d.glyph.width && d.x<c.x+c.glyph.width && c.y<d.y+d.glyph.height && d.y<c.y+c.glyph.height
+        } } + shapes
     }
     private func key(_ w: Int, _ rows: [Int]) -> UInt64 {
         var k=UInt64(w); for y in 0..<4 { k=(k << 8)|UInt64(rows[y]) }; return k
@@ -89,10 +136,10 @@ final class SharpTextRecognizer {
         for j in y..<y+h { for x in x0..<x1 { if p[j*sw+x] != inv { return false } } }; return true
     }
     private func overlaps(_ c: Cell, _ mask: [Bool], _ sw: Int) -> Bool {
-        for y in c.y..<c.y+c.glyph.height { for x in c.x..<min(sw,c.x+c.glyph.width) { if mask[y*sw+x] { return true } } }; return false
+        for y in max(c.y,c.clipTop)..<min(c.clipBottom,c.y+c.glyph.height) { for x in max(c.x,c.clipLeft)..<min(c.clipRight,c.x+c.glyph.width) { if mask[y*sw+x] { return true } } }; return false
     }
     private func occupy(_ c: Cell, _ mask: inout [Bool], _ sw: Int) {
-        for y in c.y..<c.y+c.glyph.height { for x in c.x..<min(sw,c.x+c.glyph.width) { mask[y*sw+x]=true } }
+        for y in max(c.y,c.clipTop)..<min(c.clipBottom,c.y+c.glyph.height) { for x in max(c.x,c.clipLeft)..<min(c.clipRight,c.x+c.glyph.width) { mask[y*sw+x]=true } }
     }
     private func border(_ c: Cell, _ p: [Bool], _ sw: Int, _ sh: Int) -> Bool {
         let g=c.glyph, left=c.x+g.minX, right=c.x+g.maxX, top=c.y+g.minY, bottom=c.y+g.maxY
@@ -177,7 +224,7 @@ final class SharpTextRecognizer {
                 }
             }
         }
-        home = home || (tools && prgm && homeBorders(p,sw,sh)); self.graph=graph
+        home = home || (tools && prgm && homeBorders(p,sw,sh)); self.graph=graph; homeFrame=home; framePixels=sw==160 && sh==100 ? p:[]
         runs.sort { $0.font != $1.font ? $0.font>$1.font : $0.ink>$1.ink }
         var occupied=blocked, result:[Cell]=[]
         input = home && !graph && homeBorders(p,sw,sh) ? sh-15 : -1
@@ -185,7 +232,7 @@ final class SharpTextRecognizer {
             for x in stride(from:1,to:sw,by:6) { if let c=match(p,sw,sh,1,x,input), c.glyph.width==6 && c.glyph.character != 0 { result.append(c) } }
             for y in input..<input+8 { for x in 0..<sw { occupied[y*sw+x]=true } }
         }
-        if home && !graph { integrals(p,sw,sh,&occupied,singles,&result) }
+        if home && !graph { integrals(p,sw,sh,&occupied,singles,&result,false) }
         for r in runs {
             if r.cells.contains(where:{overlaps($0,occupied,sw)}) { continue }
             for (i,c) in r.cells.enumerated() {
@@ -241,7 +288,7 @@ final class SharpTextRecognizer {
         if let g=dynamic[key] { return g }
         let g=Glyph(1,width,rows.count,ch,rows,dynamic:true); dynamic[key]=g; return g
     }
-    private func integrals(_ p: [Bool], _ sw: Int, _ sh: Int, _ occupied: inout [Bool], _ singles: [Cell], _ out: inout [Cell]) {
+    private func integrals(_ p: [Bool], _ sw: Int, _ sh: Int, _ occupied: inout [Bool], _ singles: [Cell], _ out: inout [Cell], _ retainedContext: Bool) {
         for y in 14..<sh-20 { for x in 0...sw-5 { for inv in [false,true] {
             if row(p,sw,x,y,5,inv) != 2 || row(p,sw,x,y+1,5,inv) != 5 { continue }
             var end=y+2; while end<sh-14 && row(p,sw,x,end,5,inv)==4 { end += 1 }
@@ -249,26 +296,26 @@ final class SharpTextRecognizer {
             let h=end-y+2; var rows=Array(repeating:4,count:h); rows[0]=2; rows[1]=5; rows[h-2]=20; rows[h-1]=8
             let c=Cell(x:x,y:y,inverse:inv,glyph:cached("integral:\(h)",rows,5,Self.special(189)))
             if overlaps(c,occupied,sw) || (!inv && !border(c,p,sw,sh)) { continue }
-            if !singles.contains(where:{$0.inverse==inv && $0.x>=x+5 && $0.x<=x+20 && $0.y>=y && $0.y+$0.glyph.height<=y+h+1 && border($0,p,sw,sh)}) { continue }
+            if !singles.contains(where:{$0.inverse==inv && $0.x>=x+5 && $0.x<=x+(retainedContext ? 60:20) && $0.y>=y && $0.y+$0.glyph.height<=y+h+1 && (retainedContext || border($0,p,sw,sh))}) { continue }
             occupy(c,&occupied,sw); out.append(c)
         } } }
     }
     private func parentheses(_ p: [Bool], _ sw: Int, _ sh: Int, _ occupied: inout [Bool], _ out: inout [Cell]) {
         var candidates:[Cell]=[]
-        for y in 14..<sh-18 { for x in 0...sw-3 {
-            let cap=row(p,sw,x,y,3,false); if cap != 1 && cap != 4 { continue }
+        for y in 14..<sh-18 { for x in 0...sw-3 { for inv in [false,true] {
+            let cap=row(p,sw,x,y,3,inv); if cap != 1 && cap != 4 { continue }
             let ch=cap==1 ? 40:41, stem=cap==1 ? 4:1
-            if row(p,sw,x,y+1,3,false) != 2 { continue }
-            var end=y+2; while end<sh-14 && row(p,sw,x,end,3,false)==stem { end += 1 }
-            if end<y+5 || row(p,sw,x,end,3,false) != 2 || row(p,sw,x,end+1,3,false) != cap { continue }
+            if row(p,sw,x,y+1,3,inv) != 2 { continue }
+            var end=y+2; while end<sh-14 && row(p,sw,x,end,3,inv)==stem { end += 1 }
+            if end<y+5 || row(p,sw,x,end,3,inv) != 2 || row(p,sw,x,end+1,3,inv) != cap { continue }
             let h=end-y+2; var rows=Array(repeating:stem,count:h); rows[0]=cap; rows[1]=2; rows[h-2]=2; rows[h-1]=cap
-            let c=Cell(x:x,y:y,inverse:false,glyph:cached("\(ch):\(h)",rows,3,ch))
-            if !overlaps(c,occupied,sw) && border(c,p,sw,sh) && exact(c,p,sw) { candidates.append(c) }
-        } }
+            let c=Cell(x:x,y:y,inverse:inv,glyph:cached("\(ch):\(h)",rows,3,ch))
+            if !overlaps(c,occupied,sw) && (inv || border(c,p,sw,sh)) && exact(c,p,sw) { candidates.append(c) }
+        } } }
         for left in candidates where left.glyph.character==40 {
-            guard let right=candidates.filter({$0.glyph.character==41 && $0.y==left.y && $0.glyph.height==left.glyph.height && $0.x>left.x+3}).min(by:{$0.x<$1.x}) else { continue }
+            guard let right=candidates.filter({$0.glyph.character==41 && $0.inverse==left.inverse && $0.y==left.y && $0.glyph.height==left.glyph.height && $0.x>left.x+3}).min(by:{$0.x<$1.x}) else { continue }
             if overlaps(left,occupied,sw) || overlaps(right,occupied,sw) { continue }
-            if !out.contains(where:{anchor($0.glyph.character) && $0.x>=left.x+3 && $0.x+$0.glyph.width<=right.x && $0.y>=left.y && $0.y+$0.glyph.height<=left.y+left.glyph.height+1}) { continue }
+            if !out.contains(where:{anchor($0.glyph.character) && $0.inverse==left.inverse && $0.x>=left.x+3 && $0.x+$0.glyph.width<=right.x && $0.y>=left.y && $0.y+$0.glyph.height<=left.y+left.glyph.height+1}) { continue }
             occupy(left,&occupied,sw); occupy(right,&occupied,sw); out.append(left); out.append(right)
         }
     }

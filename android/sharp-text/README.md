@@ -1,6 +1,6 @@
 # Sharp text prototype (Android ARM64, build 1150)
 
-Install the updated 64-bit APK, open system Back → Configuration Settings → Display Settings, and enable **Sharp Text (Prototype)**. Unchecking it restores the original calculator LCD. It is off by default, and the setting is saved separately for each calculator instance. The prototype requires the Solid LCD setting with grayscale disabled; otherwise the original display is drawn automatically. iOS is unchanged.
+Install the updated 64-bit APK, open system Back → Configuration Settings → Display Settings, and enable **Sharp Text (Prototype)**. Unchecking it restores the original calculator LCD. It is off by default, and the setting is saved separately for each calculator instance. The prototype requires the Solid LCD setting with grayscale disabled; otherwise the original display is drawn automatically. The same Sharp Text feature is available on iOS.
 
 ![Actual emulator screenshots: original versus sharp Home and menu text](comparison.png)
 
@@ -12,7 +12,7 @@ The Java recognizer checks exact cell pixels, including normal and inverse text,
 
 The renderer uses a uniform scale, including the face's full descenders and round-letter overshoot, to fit the original text cell. It does not compress descenders or stretch letters sideways. Variable-height pretty-print parentheses are an exception: the approved parenthesis outline is sized independently in each direction to match the ROM delimiter rectangle. Character positions and spacing remain controlled by the ROM. The variable-width small font can use a smaller uniform size in a narrow cell. Only original glyph ink bounds are cleared; live cursor pixels in padding remain visible. The original 160 × 100 layout, arithmetic, key handling, and emulated CPU execution are unchanged. The built-in Take Screenshot action also respects the toggle. The overlay uses the bitmap's actual destination dimensions, including the legacy integer-zoom case where the skin rectangle and bitmap height differ.
 
-Each updated screen is recognized afresh. Previously recognized letters are also checked against their current pixels so loss of surrounding run context does not make unchanged text flicker back to bitmap text. Only solid cursor columns or a bottom underline are allowed to change in cell padding; drawing replaces the glyph ink rectangle and leaves that padding visible. Changed or cleared glyph pixels immediately invalidate the overlay. No old ROM drawing calls or timed stale-text hold are used. When the graph toolbar is recognized, the plotting area stays original; its toolbar/status text can still be sharp. The CPU instruction loop has no additional hooks or throttling. Screen recognition/rendering still adds host work when the option is enabled; phone performance has not been measured.
+Each updated screen is recognized afresh. Previously recognized letters are also checked against their current pixels so loss of surrounding run context does not make unchanged text flicker back to bitmap text. Only solid cursor columns or a bottom underline are allowed to change in cell padding; drawing replaces the glyph ink rectangle and leaves that padding visible. Changed or cleared glyph pixels immediately invalidate the overlay. The shared native retained-text layer now supplies validated ROM character identities and positions first, with this recognizer as fallback. Captured text is invalidated when glyph pixels change, the screen clears, or a saved state loads. Bitmap save/restore and selection inversion preserve validated identities; cursor padding remains visible. No timed stale-text hold is used. When the graph toolbar is recognized, the plotting area stays original; its toolbar/status text can still be sharp. The CPU loop has a page-filtered capture hook, active only with Sharp Text enabled. It does not throttle or modify guest state. Screen recognition/rendering still adds host work when the option is enabled; phone performance has not been measured.
 
 ## Prototype limits
 
@@ -95,3 +95,21 @@ The screenshots above are from the test emulator. Physical Galaxy S22 Ultra test
 Font API background: [TI's font description](https://education.ti.com/en/customer-support/knowledge-base/other-graphing/product-usage/12138) and [GCC4TI graphics documentation](https://debrouxl.github.io/gcc4ti/graph.html).
 
 Build 1140 follow-up: 70 captured Home frames with typed narrow letters had identical toolbar and letter pixels; only the cursor changed (two states). Touch-key `2+3` returned `5`, inverse menu text and the original-display toggle were checked again, and no Android runtime crash was logged. This does not reproduce every possible S22 Ultra screen transition; physical-device confirmation is still needed.
+
+## Retained text layer
+
+Both platforms share the same native capture mechanism and approved font. Actual Home, Tools, Catalog, editor, pretty-print, history selection and menu restoration checks pass; all 19 original LCD frames are identical with capture enabled, and the Android/Swift merge results match. Tall mathematical shapes and untracked drawing remain on the existing fallback. See [implementation, limits and isolated checks](../../tools/drawing-trace/README.md).
+
+### Tall mathematical shapes and selection
+
+Tall parentheses are checked in both normal and inverted text, with pairs required to have matching height and polarity. After native character identities are merged, a second exact-shape pass uses those character positions to validate integrals and parentheses. This avoids rejecting valid selected expressions because a background border is clipped, or because limits/fractions separate the integrand from the integral stem. Complete caps and stems remain mandatory; clipped or altered shapes stay original. Shape detection can replace conflicting pixel-recognized fragments but cannot overwrite verified native characters, editor text, disabled toolbar tiles or graph areas. Approved outlines are unchanged.
+
+Actual-ROM checks cover a 25-row integral and paired parentheses in normal and inverted history selection. Java/Swift behavior matches on all 21 captured screens; existing graph, clearing, changed-cap and disabled-menu regressions pass.
+
+### Approved Catalog triangle
+
+ROM character 18 now uses the approved filled right-pointing triangle in both renderers, including normal/inverse conversion commands and the Catalog selection pointer. Its vertices use the original glyph ink bounds; the medium-font path is `(1,1) → (4,3.5) → (1,6)`. Character advance and padding stay unchanged. It is drawn as a vector path, separately from the shafted arrow (ROM code 22); the TTF and earlier glyph designs are unchanged.
+
+Clipped text and tall math (2026-10-10): the retained layer now preserves partially visible ROM characters and captures integral/parenthesis geometry before clipping. The approved outlines are drawn at their full original height and clipped to the calculator's own viewport, including inverted selections. Font designs are unchanged. Unknown internal ROM instruction layouts retain pixel fallback.
+
+Inverse trig raised −1 (Android build 1152): ROM character 180 now uses the approved size-specific composition of the existing minus and numeral 1. The three new font outlines use 200 units per LCD pixel and a baseline at y=10; both renderers use the same fixed transform, preserving the approved preview in normal and inverted text. Reproduce these additions with `android/sharp-text/build-inverse-trig-font.py INPUT_TTF OUTPUT_TTF` after the other approved font integration steps. Earlier outlines and advances remain unchanged.

@@ -96,3 +96,5 @@ Build 1148 fixes the pixelated `e^(` Catalog entry by accepting the complete adj
 Build 1149 recognizes variable-height Home pretty-print integrals (normal/inverse) with the existing approved shape and prevents fresh/cached fragments from overwriting disabled F-menu tiles. Derivative d and dropdown arrow candidates remain preview-only pending approval. All existing glyph designs are unchanged.
 
 Build 1150 integrates the approved derivative d at all ROM font sizes and a sharp triangular dropdown beside enabled F-key labels. Normal/inverse dropdown context, disabled/cache rejection, and all 45 approved font-symbol tests pass. Earlier glyph designs and metrics remain unchanged.
+
+Build 1151 preserves partially clipped letters/numbers and tall integral/parenthesis geometry in Sharp Text on ARM64. The shared native observer reads full shape dimensions before guest clipping, and Android erases/draws only inside the guest viewport. The approved font is unchanged. Real-ROM 80-row clipped normal/inverted expressions and Java/Swift retained-layer parity pass; original LCD capture-on/off comparisons remain byte-identical.

@@ -27,5 +27,37 @@
       ]
     ],
     "approval": "approved"
+  },
+  "catalogRightTriangle": {
+    "romCode": 18,
+    "character": 57618,
+    "approval": "approved",
+    "outline": "vertices at ink bounds: (minX,minY), (maxX+1,(minY+maxY+1)/2), (minX,maxY+1)",
+    "mediumOutline": [
+      [
+        1,
+        1
+      ],
+      [
+        4,
+        3.5
+      ],
+      [
+        1,
+        6
+      ]
+    ]
+  },
+  "inverseTrigSuperscript": {
+    "romCode": 180,
+    "character": 57780,
+    "approval": "approved",
+    "preview": "pending-inverse-trig-v2.png",
+    "glyphs": [
+      "graph89Inverse0",
+      "graph89Inverse1",
+      "graph89Inverse2"
+    ],
+    "outline": "Approved minus and 1 composed uniformly into each ROM font size; 200 font units per LCD pixel, baseline at LCD y=10."
   }
 }

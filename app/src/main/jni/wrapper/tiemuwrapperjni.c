@@ -24,6 +24,7 @@
 #include <androidlog.h>
 #include <ti68k_def.h>
 #include <string.h>
+#include "hdtext.h"
 
 extern JNIEnv * DbusJNIenv;
 JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuStep1LoadDefaultConfig(JNIEnv * env, jobject obj)
@@ -184,4 +185,21 @@ JNIEXPORT jbyteArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nat
         return array;
     }
     return (*env)->NewByteArray(env, 0);
+}
+
+JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuRetainedTextEnable(JNIEnv *env,jobject obj,jboolean enabled)
+{
+    hdtext_enable(enabled);
+}
+JNIEXPORT jintArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuGetRetainedText(JNIEnv *env,jobject obj,jbooleanArray pixels)
+{
+    if(!pixels || (*env)->GetArrayLength(env,pixels)!=16000)return (*env)->NewIntArray(env,0);
+    jboolean *p=(*env)->GetBooleanArrayElements(env,pixels,NULL);
+    if(!p)return NULL;
+    int32_t packets[1024*12];
+    int count=tiemu_copy_retained_screen((const uint8_t *)p,packets);
+    (*env)->ReleaseBooleanArrayElements(env,pixels,p,JNI_ABORT);
+    jintArray result=(*env)->NewIntArray(env,count*12);
+    if(result)(*env)->SetIntArrayRegion(env,result,0,count*12,(const jint *)packets);
+    return result;
 }

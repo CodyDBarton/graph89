@@ -150,7 +150,7 @@ final class CalculatorController: UIViewController {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             stateURL = folder.appendingPathComponent(ProcessInfo.processInfo.arguments.contains("--ui-test") ? "ui-test.state" : "titanium.state")
             let image = folder.appendingPathComponent("titanium.img")
-            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock)
+            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock, sharpText: settings.sharpText)
             let arguments = ProcessInfo.processInfo.arguments
             engine.start(os: os.path, image: image.path, state: stateURL.path,
                          fresh: arguments.contains("--fresh-session"),
@@ -208,7 +208,7 @@ final class CalculatorController: UIViewController {
         let controller = ConfigurationController(settings: settings)
         controller.onChange = { [weak self] in
             guard let self else { return }
-            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock)
+            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText)
             self.keyHaptics.configure(duration: self.settings.hapticDuration)
             self.hdDisplay.enabled = self.settings.sharpText
             self.view.setNeedsLayout()
@@ -225,17 +225,17 @@ final class CalculatorController: UIViewController {
             guard let self else { return }
             self.framePending = false
             guard self.running else { return }
-            self.refreshScreen(frame.pixels)
+            self.refreshScreen(frame.pixels, retained: frame.retained)
             if ProcessInfo.processInfo.arguments.contains("--ui-test") {
                 self.engineMonitor.accessibilityValue = "\(frame.normalIterations),\(frame.turboIterations),\(frame.busy ? 1 : 0)"
             }
         }
     }
 
-    private func refreshScreen(_ data: Data) {
+    private func refreshScreen(_ data: Data, retained: [Int32]) {
+        hdDisplay.update(data, retained: retained)
         guard data != lastPixels else { return }
         lastPixels = data
-        hdDisplay.update(data)
         guard let provider = CGDataProvider(data: data as CFData),
               let image = CGImage(width: 160, height: 100, bitsPerComponent: 8, bitsPerPixel: 8,
                                   bytesPerRow: 160, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: [],
@@ -294,6 +294,7 @@ final class CalculatorController: UIViewController {
 final class CalculatorEngine {
     struct Frame {
         let pixels: Data
+        let retained: [Int32]
         let on: Bool
         let busy: Bool
         let normalIterations: UInt64
@@ -329,8 +330,9 @@ final class CalculatorEngine {
             DispatchQueue.main.async { completion(error) }
         }
     }
-    func configure(cpuPercent: Int, overclock: Bool) {
+    func configure(cpuPercent: Int, overclock: Bool, sharpText: Bool) {
         queue.async {
+            graph89_retained_text_enable(sharpText ? 1 : 0)
             self.cpuPercent = cpuPercent
             self.overclock = overclock
             self.restart()
@@ -402,7 +404,9 @@ final class CalculatorEngine {
         queue.async {
             var bytes = [UInt8](repeating: 210, count: 160 * 100)
             graph89_copy_screen(&bytes)
-            let frame = Frame(pixels: Data(bytes), on: graph89_screen_is_on() != 0,
+            var packets = [Int32](repeating: 0, count: 1024 * 12)
+            let count = graph89_copy_retained_text(&bytes, &packets, 1024)
+            let frame = Frame(pixels: Data(bytes), retained: Array(packets.prefix(Int(count) * 12)), on: graph89_screen_is_on() != 0,
                               busy: graph89_is_busy() != 0, normalIterations: self.normalIterations,
                               turboIterations: self.turboIterations)
             DispatchQueue.main.async { completion(frame) }

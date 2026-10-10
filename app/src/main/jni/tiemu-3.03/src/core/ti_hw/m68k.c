@@ -42,6 +42,7 @@
 #include "ti68k_def.h"
 #include "ti68k_err.h"
 #include "mem.h"
+#include "hdtext.h"
 #include "hw.h"
 #include "hwprot.h"
 #include "bkpts.h"
@@ -57,11 +58,17 @@
 #include "gettimeofday.h"
 #endif
 
+/* Diagnostic builds only: observe instruction entry without touching guest state. */
+#ifdef GRAPH89_DRAW_TRACE
+void (*graph89_instruction_trace)(uint32_t pc) = NULL;
+#endif
+
 int pending_ints;
 extern int enable_grayscale;
 
 int hw_m68k_init(void)
 {
+    hdtext_reset();
     // init breakpoints
     ti68k_bkpt_clear_address();
 	ti68k_bkpt_clear_exception();
@@ -85,6 +92,7 @@ int hw_m68k_init(void)
 
 int hw_m68k_reset(void)
 {
+    hdtext_reset();
 	// retrieve SSP & PC values for boot
 	find_ssp_and_pc(&tihw.initial_ssp, &tihw.initial_pc);
 
@@ -98,6 +106,8 @@ int hw_m68k_reset(void)
 
 int hw_m68k_exit(void)
 {
+    hdtext_enable(0);
+    hdtext_reset();
     ti68k_bkpt_clear_address();
 	ti68k_bkpt_clear_exception();
 
@@ -152,6 +162,7 @@ int hw_m68k_run(int n)
 {
 	int i;
 
+    hdtext_run_begin();
     for(i = 0; i < n; ++i)
 	{
 		uae_u32 opcode;
@@ -238,6 +249,12 @@ int hw_m68k_run(int n)
 		}
 */
 
+#ifdef GRAPH89_DRAW_TRACE
+        if (graph89_instruction_trace) graph89_instruction_trace(m68k_getpc());
+#endif
+
+        if (hdtext_active && hdtext_pages[(m68k_getpc() & 0xffffff) >> 8]) hdtext_observe(m68k_getpc());
+
 		// search for next opcode and execute it
 		opcode = get_iword_prefetch (0);
 		insn_cycles = (*cpufunctbl[opcode])(opcode) * 2; // increments PC automatically now
@@ -285,12 +302,14 @@ int hw_m68k_run(int n)
 	        if (regs.spcflags & SPCFLAG_BRK) 
 	        {		
 				unset_special(SPCFLAG_BRK);
+				hdtext_run_end();
 				return DBG_BREAK;
 	        }
 
 	        if(regs.spcflags & SPCFLAG_DBTRACE) 
 	        {
 				unset_special(SPCFLAG_DBTRACE);
+				hdtext_run_end();
 				return DBG_TRACE;
 	        }
 
@@ -301,5 +320,6 @@ int hw_m68k_run(int n)
 	    }
 	}
 
+    hdtext_run_end();
 	return 0;
 }

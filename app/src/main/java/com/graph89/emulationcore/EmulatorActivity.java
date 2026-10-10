@@ -801,6 +801,8 @@ public class EmulatorActivity extends Graph89ActivityBase
 	public native static void nativeCleanGraph89();
 	public native static int  nativeInstallROM(String rom_source, String rom_destination, int calc_type, int is_rom);
 	public native static byte[] nativeTiEmuGetFontTemplates();
+    public native static void nativeTiEmuRetainedTextEnable(boolean enabled);
+    public native static int[] nativeTiEmuGetRetainedText(boolean[] pixels);
 
 	public native static int  nativeReadEmulatedScreen(byte[] returnFlags);
 	public native static void nativeGetEmulatedScreen(int[] screenBuffer);

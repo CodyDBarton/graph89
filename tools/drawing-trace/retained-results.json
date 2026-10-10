@@ -1,0 +1,154 @@
+{
+  "ROM": "TI-89 Titanium AMS 3.10",
+  "frames": [
+    {
+      "frame": "00-boot.pgm",
+      "identical": true,
+      "captured_characters": 86
+    },
+    {
+      "frame": "01-home.pgm",
+      "identical": true,
+      "captured_characters": 70
+    },
+    {
+      "frame": "02-input.pgm",
+      "identical": true,
+      "captured_characters": 80
+    },
+    {
+      "frame": "03-pretty-print.pgm",
+      "identical": true,
+      "captured_characters": 97
+    },
+    {
+      "frame": "04-history-selected.pgm",
+      "identical": true,
+      "captured_characters": 61
+    },
+    {
+      "frame": "05-tools-menu.pgm",
+      "identical": true,
+      "captured_characters": 145
+    },
+    {
+      "frame": "06-catalog.pgm",
+      "identical": true,
+      "captured_characters": 72
+    },
+    {
+      "frame": "07-catalog-selected.pgm",
+      "identical": true,
+      "captured_characters": 78
+    },
+    {
+      "frame": "08-integral-input.pgm",
+      "identical": true,
+      "captured_characters": 99
+    },
+    {
+      "frame": "09-integral-pretty.pgm",
+      "identical": true,
+      "captured_characters": 112
+    },
+    {
+      "frame": "10-exponential-input.pgm",
+      "identical": true,
+      "captured_characters": 105
+    },
+    {
+      "frame": "11-exponential-pretty.pgm",
+      "identical": true,
+      "captured_characters": 110
+    },
+    {
+      "frame": "12-derivative-input.pgm",
+      "identical": true,
+      "captured_characters": 113
+    },
+    {
+      "frame": "13-derivative-pretty.pgm",
+      "identical": true,
+      "captured_characters": 120
+    },
+    {
+      "frame": "14-tall-integral-input.pgm",
+      "identical": true,
+      "captured_characters": 130
+    },
+    {
+      "frame": "15-tall-integral-pretty.pgm",
+      "identical": true,
+      "captured_characters": 120
+    },
+    {
+      "frame": "15b-tall-integral-selected.pgm",
+      "identical": true,
+      "captured_characters": 84
+    },
+    {
+      "frame": "15c-clipped-math-input.pgm",
+      "identical": true,
+      "captured_characters": 127
+    },
+    {
+      "frame": "15d-clipped-math-pretty.pgm",
+      "identical": true,
+      "captured_characters": 115
+    },
+    {
+      "frame": "15e-clipped-math-selected.pgm",
+      "identical": true,
+      "captured_characters": 75
+    },
+    {
+      "frame": "16-catalog-e.pgm",
+      "identical": true,
+      "captured_characters": 85
+    },
+    {
+      "frame": "16b-menu-restored.pgm",
+      "identical": true,
+      "captured_characters": 111
+    },
+    {
+      "frame": "16c-catalog-p.pgm",
+      "identical": true,
+      "captured_characters": 81
+    },
+    {
+      "frame": "17-apps-menu.pgm",
+      "identical": true,
+      "captured_characters": 86
+    }
+  ],
+  "checks": {
+    "original_LCD_unchanged": true,
+    "cursor_padding_retained": true,
+    "inverse_selection_tracks_polarity": true,
+    "blank_LCD_invalidates_all_cells": true,
+    "state_restore_clears_retained_cache": true,
+    "italic_e_captured_editor_pretty_catalog": true,
+    "derivative_d_captured": true,
+    "Android_iOS_merge_parity_frames": 27,
+    "normal_and_inverse_25_row_integral_and_parentheses": true,
+    "iPhone17_and_iPad9_tall_math_UI_tests": true,
+    "Catalog_conversion_triangle_Rx_Ry_native_identities": true,
+    "normal_and_inverse_clipped_80_row_integral_and_parentheses": true,
+    "top_edge_clipped_number_retained": true,
+    "hidden_pixels_do_not_invalidate_clipped_shape": true,
+    "visible_clipped_shape_inversion_tracks_polarity": true,
+    "cleared_clipped_shape_invalidates_identity": true,
+    "mid_drawing_frame_validation_probes": 20,
+    "iPhone17_and_iPad9_clipped_math_UI_tests": true,
+    "inverse_trig_input_pretty_selected_native_identity": true,
+    "iPhone17_inverse_trig_UI_test": true,
+    "previous_font_outlines_and_advances_unchanged": true
+  },
+  "font_outlines_changed": true,
+  "font_outlines_added": [
+    "graph89Inverse0",
+    "graph89Inverse1",
+    "graph89Inverse2"
+  ]
+}

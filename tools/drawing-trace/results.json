@@ -1,0 +1,181 @@
+{
+  "rom_model": "TI-89 Titanium",
+  "rom_version": "3.10",
+  "date": "2026-10-09",
+  "events": 16043,
+  "call_counts": {
+    "SetCurClip": 462,
+    "PortRestore": 561,
+    "ClrScr": 1,
+    "FontSetSys": 1286,
+    "WinClr": 27,
+    "ScrRectFill": 638,
+    "DrawLine": 7803,
+    "DrawClipLine": 374,
+    "SaveScrState": 576,
+    "RestoreScrState": 576,
+    "WinFont": 265,
+    "WinStrXY": 322,
+    "WinStr": 322,
+    "DrawClipChar": 1257,
+    "DrawChar": 856,
+    "BitmapPut": 18,
+    "SetCurAttr": 189,
+    "DrawStr": 62,
+    "DrawFkey": 50,
+    "DrawClipRect": 26,
+    "WinChar": 53,
+    "Print2DExpr": 26,
+    "DrawPix": 230,
+    "WinCharXY": 57,
+    "BitmapGet": 6
+  },
+  "checks": {
+    "italic_e_input": true,
+    "italic_e_pretty": true,
+    "italic_e_catalog": true,
+    "derivative_d": true,
+    "shaded_toolbar": true,
+    "pretty_print_entry": true,
+    "no_error_dialog": true,
+    "valid_live_text_font": true
+  },
+  "frames": [
+    {
+      "frame": "00-boot.pgm",
+      "identical": true
+    },
+    {
+      "frame": "01-home.pgm",
+      "identical": true
+    },
+    {
+      "frame": "02-input.pgm",
+      "identical": true
+    },
+    {
+      "frame": "03-pretty-print.pgm",
+      "identical": true
+    },
+    {
+      "frame": "04-history-selected.pgm",
+      "identical": true
+    },
+    {
+      "frame": "05-tools-menu.pgm",
+      "identical": true
+    },
+    {
+      "frame": "06-catalog.pgm",
+      "identical": true
+    },
+    {
+      "frame": "07-catalog-selected.pgm",
+      "identical": true
+    },
+    {
+      "frame": "08-integral-input.pgm",
+      "identical": true
+    },
+    {
+      "frame": "09-integral-pretty.pgm",
+      "identical": true
+    },
+    {
+      "frame": "10-exponential-input.pgm",
+      "identical": true
+    },
+    {
+      "frame": "11-exponential-pretty.pgm",
+      "identical": true
+    },
+    {
+      "frame": "12-derivative-input.pgm",
+      "identical": true
+    },
+    {
+      "frame": "13-derivative-pretty.pgm",
+      "identical": true
+    },
+    {
+      "frame": "14-tall-integral-input.pgm",
+      "identical": true
+    },
+    {
+      "frame": "15-tall-integral-pretty.pgm",
+      "identical": true
+    },
+    {
+      "frame": "16-catalog-e.pgm",
+      "identical": true
+    },
+    {
+      "frame": "17-apps-menu.pgm",
+      "identical": true
+    }
+  ],
+  "live_font_vs_hint_mismatches": 254,
+  "character_examples": [
+    {
+      "phase": "input",
+      "call": "DrawClipChar",
+      "character": 50,
+      "x": 48,
+      "y": 85,
+      "font": 1,
+      "attr": 4,
+      "port": 19456
+    },
+    {
+      "phase": "pretty-print",
+      "call": "DrawChar",
+      "character": 50,
+      "x": 148,
+      "y": 70,
+      "font": 1,
+      "attr": 1,
+      "port": 19456
+    },
+    {
+      "phase": "exponential-input",
+      "call": "DrawClipChar",
+      "character": 150,
+      "x": 0,
+      "y": 85,
+      "font": 1,
+      "attr": 4,
+      "port": 19456
+    },
+    {
+      "phase": "exponential-pretty",
+      "call": "DrawChar",
+      "character": 150,
+      "x": 147,
+      "y": 74,
+      "font": 1,
+      "attr": 1,
+      "port": 19456
+    },
+    {
+      "phase": "derivative-pretty",
+      "call": "DrawChar",
+      "character": 188,
+      "x": 13,
+      "y": 63,
+      "font": 1,
+      "attr": 1,
+      "port": 19456
+    },
+    {
+      "phase": "catalog-e",
+      "call": "DrawChar",
+      "character": 150,
+      "x": 16,
+      "y": 36,
+      "font": 1,
+      "attr": 4,
+      "port": 19456
+    }
+  ],
+  "scope": "Standalone macOS harness using shared TI-68k core. No renderer integration or full coverage percentage."
+}

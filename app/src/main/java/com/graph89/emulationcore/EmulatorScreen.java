@@ -196,6 +196,7 @@ public class EmulatorScreen
 		synchronized (EmulatorScreen.ScreenChangeLock)
 		{
 			++cntr;
+            EmulatorActivity.nativeTiEmuRetainedTextEnable(useSharpText());
 
 			if (EngineScreenParams.RawHeight != mRawScreenHeight || EngineScreenParams.RawWidth != mRawScreenWidth || EngineScreenParams.Zoom != Zoom)
 			{

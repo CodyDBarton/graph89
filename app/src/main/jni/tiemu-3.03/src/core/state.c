@@ -43,6 +43,7 @@
 #include <string.h>
 
 #include "libuae.h"
+#include "hdtext.h"
 #include "ti68k_int.h"
 #include "ti68k_err.h"
 #include "flash.h"
@@ -252,6 +253,7 @@ int ti68k_state_load(const char *filename)
 		ti68k_state_save(filename);
 	}
 
+    hdtext_reset();
   	return 0;
 }
 

@@ -30,6 +30,18 @@
 #include <tiemuwrapper.h>
 #include <androidlog.h>
 #include <string.h>
+#include "hdtext.h"
+
+static uint8_t retained_pixels[16000];
+static int32_t retained_packets[1024*12];
+static int retained_count;
+
+/* Called by the serialized screen reader, not the CPU thread. */
+int tiemu_copy_retained_screen(const uint8_t *pixels,int32_t *out) {
+    if(memcmp(pixels,retained_pixels,sizeof retained_pixels))return 0;
+    memcpy(out,retained_packets,retained_count*12*sizeof(int32_t));
+    return retained_count;
+}
 
 extern CalcHandle*  calc_handle;
 extern int enable_grayscale;
@@ -190,6 +202,7 @@ int tiemu_is_busy()
 
 int tiemu_read_emulated_screen (uint8_t *return_flags)
 {
+    hdtext_run_begin();
 	int i, j, k;
 	uint32_t crc = 0xFFFFFFFF;
 
@@ -216,6 +229,13 @@ int tiemu_read_emulated_screen (uint8_t *return_flags)
 	return_flags[0] = tihw.on_off == 0; //is screen off
 	return_flags[1] = tihw.lcd_ptr[(height - 1) * LCDMEM_W / 8 + widthdiv8 - 1] & g89_shift_table[7];  //is calculator busy
 
+    retained_count=0;
+    if(hdtext_active && tihw.on_off && !enable_grayscale && raw_width==160 && raw_height==100) {
+        for(int y=0;y<100;y++)for(int x=0;x<160;x++)
+            retained_pixels[y*160+x]=(tihw.lcd_ptr[y*LCDMEM_W/8+x/8] & (0x80>>(x&7)))!=0;
+        retained_count=hdtext_copy_locked(retained_pixels,retained_packets,1024);
+    }
+    hdtext_run_end();
 	return CRC;
 }
 

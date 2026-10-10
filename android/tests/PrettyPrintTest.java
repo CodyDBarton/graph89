@@ -60,6 +60,14 @@ public final class PrettyPrintTest {
         check(has(cs,'2',41,40),"Raised digit beside parenthesis cap");
         check(has(cs,'(',29,40)&&has(cs,')',47,40),"Tall parentheses recognized as a pair");
         check(delimiters(cs)==2,"No partial-parenthesis letters");
+        // Native character positions supply context even when an inverse
+        // selection clips the background border needed by pixel-only singles.
+        boolean[] inverseTall=p.clone();
+        for(int yy=40;yy<52;yy++)for(int xx=29;xx<50;xx++)inverseTall[yy*W+xx]=!inverseTall[yy*W+xx];
+        List<SharpTextRecognizer.Cell> inverseCells=r.retained(new int[]{
+            34,44,1,'x',1,6,8,4,0,0,160,100, 41,40,1,'2',1,6,8,4,0,0,160,100},r.recognize(inverseTall,W,H));
+        check(has(inverseCells,'(',29,40)&&has(inverseCells,')',47,40),"Retained context sharpens inverse tall parentheses");
+        for(SharpTextRecognizer.Cell c:inverseCells)if(c.glyph.mathDelimiter)check(c.inverse,"Tall inverseTall parentheses retain inverse polarity");
         // A smaller exponent at a second level and an outer, taller pair.
         paren(p,24,35,22,false); paren(p,57,35,22,true);
         draw(p,51,35,4,THREE);
@@ -81,6 +89,20 @@ public final class PrettyPrintTest {
         draw(p,34,44,6,X); draw(p,41,40,6,TWO);
         cs=r.recognize(p,W,H);
         check(!has(cs,'2',41,40)&&delimiters(cs)==0,"Graph plotting area remains original");
+        // The integrand can be farther from the stem, behind limits and a
+        // tall fraction/parenthesis. Its verified native identity is enough.
+        for(boolean inverse:new boolean[]{false,true}) {
+            boolean[] far=home("Algebra");int h=25;
+            int[] rows=new int[h];rows[0]=2;rows[1]=5;rows[h-2]=20;rows[h-1]=8;
+            for(int yy=2;yy<h-2;yy++)rows[yy]=4;
+            draw(far,10,25,5,rows);draw(far,50,30,6,X);
+            if(inverse)for(int yy=25;yy<50;yy++)for(int xx=10;xx<60;xx++)far[yy*W+xx]=!far[yy*W+xx];
+            List<SharpTextRecognizer.Cell> merged=r.retained(new int[]{50,30,1,'x',inverse?1:0,6,8,4,0,0,160,100},r.recognize(far,W,H));
+            check(has(merged,SharpTextRecognizer.specialCharacter(189),10,25),"Retained distant integral anchor, inverse="+inverse);
+            far[25*W+11]=!far[25*W+11];
+            merged=r.retained(new int[]{50,30,1,'x',inverse?1:0,6,8,4,0,0,160,100},r.recognizeStable(far,W,H,merged));
+            check(!has(merged,SharpTextRecognizer.specialCharacter(189),10,25),"Changed integral cap rejected with retained context");
+        }
         check(r.recognizeStable(new boolean[W*H],W,H,previous).isEmpty(),"Clearing removes pretty-print overlays");
         // The Home input editor accepts punctuation on its fixed medium-font
         // grid in both polarities, without interpreting smaller fragments.
@@ -132,7 +154,7 @@ public final class PrettyPrintTest {
             check(has(inverse,mapped,1,85),"Inverse approved special code "+code);
             for(SharpTextRecognizer.Cell c:inverse) if(c.x==1&&c.y==85) check(c.inverse,"Special polarity");
         }
-        check(approvedCount==45,"Exactly the 45 reviewed font symbols enabled");
+        check(approvedCount==47,"Exactly 46 reviewed font symbols plus the approved Catalog triangle enabled");
         check(SharpTextRecognizer.specialCharacter(192)==0,"Unapproved accented letter not enabled");
         // Catalog functions may contain only one letter-like symbol. A
         // complete e^( is strong context even without a Home editor grid.
@@ -211,9 +233,26 @@ public final class PrettyPrintTest {
         p=new boolean[W*H];draw(p,12,4,3,new int[]{7,2});
         check(!has(r.recognizeStable(p,W,H,cs),SharpTextRecognizer.TOOLBAR_DROPDOWN,12,4),"Isolated triangle remains original");
         System.out.println("Dropdown: normal/inverse toolbar context, disabled/cache rejection and isolated graphic fallback passed.");
+        // Approved ROM code 18 is distinct from code 22 (the shafted arrow).
+        int[] pointer={0,16,24,28,24,16,0,0};font(1,(char)18,6,pointer);
+        font(1,'P',6,TWO);font(1,'R',6,X);font(1,'y',6,caret);
+        r=new SharpTextRecognizer(FONTS);
+        for(boolean inverse:new boolean[]{false,true}) {
+            boolean[] catalog=new boolean[W*H];
+            draw(catalog,17,36,6,TWO);draw(catalog,23,36,6,pointer);
+            draw(catalog,29,36,6,X);draw(catalog,35,36,6,caret);
+            if(inverse)for(int yy=36;yy<44;yy++)for(int xx=17;xx<41;xx++)catalog[yy*W+xx]=!catalog[yy*W+xx];
+            List<SharpTextRecognizer.Cell> glyphs=r.recognize(catalog,W,H);
+            check(has(glyphs,SharpTextRecognizer.specialCharacter(18),23,36),"Catalog pointer in a text run, inverse="+inverse);
+            glyphs=r.retained(new int[]{23,36,1,18,inverse?1:0,6,8,4,0,0,160,100},glyphs);
+            check(has(glyphs,SharpTextRecognizer.specialCharacter(18),23,36),"Native Catalog pointer identity, inverse="+inverse);
+            catalog[39*W+25]=!catalog[39*W+25];
+            check(!has(r.recognizeStable(catalog,W,H,glyphs),SharpTextRecognizer.specialCharacter(18),23,36),"Edited pointer invalidates cached recognition");
+        }
+        check(SharpTextRecognizer.specialCharacter(18)!=SharpTextRecognizer.specialCharacter(22),"Pointer does not alias the shafted arrow");
         System.out.println("Home symbols: integral heights, cap edits, graph fallback and disabled toolbar cache/fragment rejection passed.");
         System.out.println("Catalog: normal/inverse exponential token, incomplete/separated rejection and graph fallback passed.");
-        System.out.println("Special symbols: all 45 approved code mappings in normal/inverse Home input passed.");
+        System.out.println("Special symbols: all 47 approved code mappings in normal/inverse Home input passed.");
         System.out.println("Home editor: normal/inverse punctuation, off-grid fragment rejection, cursor and clearing passed.");
         System.out.println("Pretty print: raised digits, small superscripts, nested/tall parentheses, edits, clearing and graphics fallback passed.");
     }

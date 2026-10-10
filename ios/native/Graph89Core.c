@@ -6,6 +6,7 @@
 #include "kbd.h"
 #include "state.h"
 #include "engine.h"
+#include "hdtext.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -101,4 +102,11 @@ int graph89_copy_font_templates(uint8_t *templates) {
         return sizeof(result);
     }
     return 0;
+}
+
+void graph89_retained_text_enable(int enabled) { hdtext_enable(enabled); }
+int graph89_copy_retained_text(const uint8_t *screen, int32_t *packets, int capacity) {
+    uint8_t pixels[16000];
+    for(int i=0;i<16000;i++) pixels[i]=screen[i]==30;
+    return hdtext_copy(pixels, packets, capacity);
 }

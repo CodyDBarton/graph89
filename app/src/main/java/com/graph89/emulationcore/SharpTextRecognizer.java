@@ -39,11 +39,15 @@ public final class SharpTextRecognizer {
         }
     }
     public static final class Cell {
-        public final int x, y;
+        public final int x, y, clipLeft, clipTop, clipRight, clipBottom;
         public final boolean inverse;
         public final Glyph glyph;
         Cell(int x, int y, boolean inverse, Glyph glyph) {
-            this.x = x; this.y = y; this.inverse = inverse; this.glyph = glyph;
+            this(x,y,inverse,glyph,0,0,160,100);
+        }
+        Cell(int x,int y,boolean inverse,Glyph glyph,int left,int top,int right,int bottom) {
+            this.x=x;this.y=y;this.inverse=inverse;this.glyph=glyph;
+            clipLeft=left;clipTop=top;clipRight=right;clipBottom=bottom;
         }
     }
     private static final class Run {
@@ -55,6 +59,7 @@ public final class SharpTextRecognizer {
             return s.toString();
         }
     }
+    private final Glyph[][] capturedGlyphs = new Glyph[3][256];
     private boolean graphFrame;
     private boolean[] disabledToolbar;
     private final Map<Character, Glyph> toolbarLabels = new HashMap<Character, Glyph>();
@@ -67,6 +72,7 @@ public final class SharpTextRecognizer {
      * font's Windows encoding cannot confuse calculator symbol identities. */
     public static char specialCharacter(int romCode) {
         switch (romCode) {
+            case 18:
             case 22:
             case 28:
             case 29:
@@ -108,6 +114,7 @@ public final class SharpTextRecognizer {
             case 168:
             case 176:
             case 177:
+            case 180:
             case 183:
             case 188:
             case 189:
@@ -142,6 +149,7 @@ public final class SharpTextRecognizer {
                 char character = f == 0 && (c == 'I' || c == '|') ? 0 : approved;
                 Glyph glyph = new Glyph(f, w, h, character, rows);
                 if (glyph.ink == 0) continue;
+                capturedGlyphs[f][c] = character == approved ? glyph : new Glyph(f,w,h,approved,rows);
                 if (f == 0 && (c == 'F' || (c >= '1' && c <= '8'))) toolbarLabels.put((char)c, glyph);
                 long key = key(w, rows);
                 List<Glyph> bucket = table.get(key);
@@ -151,6 +159,58 @@ public final class SharpTextRecognizer {
             }
             tables.add(table); widths.add(fontWidths);
         }
+    }
+    /** Merge ROM-supplied identities over pixel-recognized fallback cells. */
+    private boolean[] framePixels;
+    private boolean homeFrame;
+    public List<Cell> retained(int[] packets, List<Cell> fallback) {
+        List<Cell> direct = new ArrayList<Cell>();
+        if (packets != null) for(int i=0;i+11<packets.length;i+=12) {
+            int x=packets[i],y=packets[i+1],f=packets[i+2],c=packets[i+3];
+            if(f<0 || f>3 || c<0 || c>=256 || packets[i+7]==3)continue;
+            Glyph g=null;
+            if(f<3)g=capturedGlyphs[f][c];
+            else {
+                int h=packets[i+6],w=c==189?5:3;
+                if(h<7 || h>512 || (c!=189 && c!=40 && c!=41) || packets[i+5]!=w)continue;
+                int[] rows=new int[h];java.util.Arrays.fill(rows,c==189?4:c==40?4:1);
+                rows[0]=rows[h-1]=c==189?2:c==40?1:4;rows[1]=rows[h-2]=2;
+                if(c==189){rows[1]=5;rows[h-2]=20;rows[h-1]=8;}
+                String key="native:"+c+":"+h;g=delimiters.get(key);
+                if(g==null){g=new Glyph(1,w,h,c==189?specialCharacter(189):(char)c,rows,true);delimiters.put(key,g);}
+            }
+            int l=packets[i+8],t=packets[i+9],r=packets[i+10],b=packets[i+11];
+            if(g==null || g.width!=packets[i+5] || g.height!=packets[i+6]
+                || l<0 || t<0 || r>160 || b>100 || l>=r || t>=b
+                || x+g.width<=l || x>=r || y+g.height<=t || y>=b)continue;
+            direct.add(new Cell(x,y,packets[i+4]!=0,g,l,t,r,b));
+        }
+        List<Cell> result=new ArrayList<Cell>(direct);
+        for(Cell c:fallback) {
+            boolean covered=false;
+            for(Cell d:direct) if(c.x<Math.min(d.clipRight,d.x+d.glyph.width) && Math.max(d.clipLeft,d.x)<c.x+c.glyph.width
+                && c.y<Math.min(d.clipBottom,d.y+d.glyph.height) && Math.max(d.clipTop,d.y)<c.y+c.glyph.height){covered=true;break;}
+            if(!covered)result.add(c);
+        }
+        if (framePixels != null && homeFrame && !graphFrame) {
+            boolean[] occupied=disabledToolbar.clone();
+            if(inputBaseline>=0)for(int y=inputBaseline;y<inputBaseline+8;y++)
+                for(int x=0;x<160;x++)occupied[y*160+x]=true;
+            for(Cell c:direct)occupy(c,occupied,160);
+            List<Cell> shaped=new ArrayList<Cell>(result);
+            addMathIntegrals(framePixels,160,100,occupied,result,shaped,true);
+            addMathDelimiters(framePixels,160,100,occupied,shaped);
+            List<Cell> shapes=new ArrayList<Cell>(shaped.subList(result.size(),shaped.size()));
+            List<Cell> merged=new ArrayList<Cell>();
+            for(Cell c:result) {
+                boolean covered=false;
+                for(Cell d:shapes)if(c.x<d.x+d.glyph.width && d.x<c.x+c.glyph.width
+                    && c.y<d.y+d.glyph.height && d.y<c.y+c.glyph.height){covered=true;break;}
+                if(!covered)merged.add(c);
+            }
+            merged.addAll(shapes);return merged;
+        }
+        return result;
     }
     private static long key(int width, int[] rows) {
         long key = width;
@@ -210,14 +270,14 @@ public final class SharpTextRecognizer {
         return true;
     }
     private static boolean overlaps(Cell c, boolean[] occupied, int sw) {
-        for (int y = c.y; y < c.y + c.glyph.height; ++y)
-            for (int x = c.x; x < Math.min(sw, c.x + c.glyph.width); ++x)
+        for (int y = Math.max(c.y,c.clipTop); y < Math.min(c.clipBottom,c.y + c.glyph.height); ++y)
+            for (int x = Math.max(c.x,c.clipLeft); x < Math.min(c.clipRight, c.x + c.glyph.width); ++x)
                 if (occupied[y * sw + x]) return true;
         return false;
     }
     private static void occupy(Cell c, boolean[] occupied, int sw) {
-        for (int y = c.y; y < c.y + c.glyph.height; ++y)
-            for (int x = c.x; x < Math.min(sw, c.x + c.glyph.width); ++x) occupied[y * sw + x] = true;
+        for (int y = Math.max(c.y,c.clipTop); y < Math.min(c.clipBottom,c.y + c.glyph.height); ++y)
+            for (int x = Math.max(c.x,c.clipLeft); x < Math.min(c.clipRight, c.x + c.glyph.width); ++x) occupied[y * sw + x] = true;
     }
     private static boolean smallIWordContext(Run run, int index, boolean[] pixels, int sw, int sh) {
         Cell c = run.cells.get(index);
@@ -359,6 +419,7 @@ public final class SharpTextRecognizer {
         }
         home |= tools && prgm && homeInputBorders(pixels, sw, sh);
         graphFrame = graph;
+        homeFrame=home;framePixels=sw==160 && sh==100 ? pixels:null;
         Collections.sort(runs, new Comparator<Run>() {
             public int compare(Run a, Run b) {
                 if (a.font != b.font) return b.font - a.font;
@@ -381,7 +442,7 @@ public final class SharpTextRecognizer {
             for (int y = inputBaseline; y < inputBaseline + 8; ++y)
                 for (int x = 0; x < sw; ++x) occupied[y * sw + x] = true;
         }
-        if (home && !graph) addMathIntegrals(pixels, sw, sh, occupied, singles, result);
+        if (home && !graph) addMathIntegrals(pixels, sw, sh, occupied, singles, result,false);
         for (Run run : runs) {
             boolean overlap = false;
             for (Cell c : run.cells) if (overlaps(c, occupied, sw)) { overlap = true; break; }
@@ -460,7 +521,7 @@ public final class SharpTextRecognizer {
     }
 
     private void addMathIntegrals(boolean[] pixels, int sw, int sh, boolean[] occupied,
-        List<Cell> singles, List<Cell> result) {
+        List<Cell> singles, List<Cell> result, boolean retainedContext) {
         // Pretty print extends this five-column stem between unchanged caps.
         // Its font-table integral is a different, fixed-height bitmap.
         for (int y = 14; y < sh - 20; ++y) for (int x = 0; x <= sw - 5; ++x) for (int polarity = 0; polarity < 2; ++polarity) {
@@ -487,9 +548,9 @@ public final class SharpTextRecognizer {
             if (overlaps(integral, occupied, sw)
                 || (!inverse && !clearInkBorder(integral, pixels, sw, sh))) continue;
             boolean expression = false;
-            for (Cell c : singles) if (c.inverse == inverse && c.x >= x + 5 && c.x <= x + 20
+            for (Cell c : singles) if (c.inverse == inverse && c.x >= x + 5 && c.x <= x + (retainedContext ? 60 : 20)
                 && c.y >= y && c.y + c.glyph.height <= y + h + 1
-                && clearInkBorder(c, pixels, sw, sh)) { expression = true; break; }
+                && (retainedContext || clearInkBorder(c, pixels, sw, sh))) { expression = true; break; }
             if (!expression) continue;
             occupy(integral, occupied, sw); result.add(integral);
         }
@@ -549,29 +610,30 @@ public final class SharpTextRecognizer {
         List<Cell> candidates = new ArrayList<Cell>();
         // The ROM extends the straight middle of a three-column parenthesis;
         // its two diagonal cap rows are unchanged at every expression height.
-        for (int y = 14; y < sh - 18; ++y) for (int x = 0; x <= sw - 3; ++x) {
-            int cap = row(pixels, sw, x, y, 3, false);
+        for (int y = 14; y < sh - 18; ++y) for (int x = 0; x <= sw - 3; ++x) for(int polarity=0;polarity<2;polarity++) {
+            boolean inverse=polarity!=0;
+            int cap = row(pixels, sw, x, y, 3, inverse);
             if (cap != 1 && cap != 4) continue;
             char ch = cap == 1 ? '(' : ')';
-            if (row(pixels, sw, x, y + 1, 3, false) != 2) continue;
+            if (row(pixels, sw, x, y + 1, 3, inverse) != 2) continue;
             int end = y + 2, stem = ch == '(' ? 4 : 1;
-            while (end < sh - 14 && row(pixels, sw, x, end, 3, false) == stem) ++end;
-            if (end < y + 5 || row(pixels, sw, x, end, 3, false) != 2
-                || row(pixels, sw, x, end + 1, 3, false) != cap) continue;
-            Cell c = new Cell(x, y, false, delimiter(ch, end - y + 2));
-            if (!overlaps(c, occupied, sw) && clearInkBorder(c, pixels, sw, sh) && exact(c, pixels, sw)) candidates.add(c);
+            while (end < sh - 14 && row(pixels, sw, x, end, 3, inverse) == stem) ++end;
+            if (end < y + 5 || row(pixels, sw, x, end, 3, inverse) != 2
+                || row(pixels, sw, x, end + 1, 3, inverse) != cap) continue;
+            Cell c = new Cell(x, y, inverse, delimiter(ch, end - y + 2));
+            if (!overlaps(c, occupied, sw) && (inverse || clearInkBorder(c, pixels, sw, sh)) && exact(c, pixels, sw)) candidates.add(c);
         }
         // Pair matching prevents an isolated curve or graph-like mark from
         // being redrawn. Require actual recognized expression text inside.
         for (Cell left : candidates) {
             if (left.glyph.character != '(') continue;
             Cell right = null;
-            for (Cell c : candidates) if (c.glyph.character == ')' && c.y == left.y
+            for (Cell c : candidates) if (c.glyph.character == ')' && c.inverse==left.inverse && c.y == left.y
                 && c.glyph.height == left.glyph.height && c.x > left.x + 3
                 && (right == null || c.x < right.x)) right = c;
             if (right == null || overlaps(left, occupied, sw) || overlaps(right, occupied, sw)) continue;
             boolean content = false;
-            for (Cell c : result) if (textAnchor(c.glyph.character)
+            for (Cell c : result) if (textAnchor(c.glyph.character) && c.inverse==left.inverse
                 && c.x >= left.x + 3 && c.x + c.glyph.width <= right.x
                 && c.y >= left.y && c.y + c.glyph.height <= left.y + left.glyph.height + 1) { content = true; break; }
             if (!content) continue;
