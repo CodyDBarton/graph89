@@ -179,14 +179,58 @@ public final class SharpTextRecognizer {
         g=new Glyph(1,w,h,c==189?specialCharacter(189):(char)c,rows,true);delimiters.put(key,g);return g;
     }
     public static final class CompactItem {
-        public double x,y,scale,x1,y1;public double clipTop=16;public boolean inverse;public Glyph glyph;public int attribute=1;
+        public double x,y,scale,x1,y1;public double clipTop=16,advance=4.5,heightScale=1;public boolean inverse;public Double selectionX;public Glyph glyph;public int attribute=1;
         CompactItem(double x,double y,double scale,boolean inverse,Glyph glyph) {this.x=x;this.y=y;this.scale=scale;this.inverse=inverse;this.glyph=glyph;}
     }
     public static final class CompactScene {
         public boolean body,input,yEditor;
+        public double[] markerOffsets=new double[67];
+        public double verticalSaved;
         public java.util.List<double[]> eraseRects=new ArrayList<double[]>();public java.util.List<CompactItem> items=new ArrayList<CompactItem>();
         public java.util.List<double[]> inverseRects=new ArrayList<double[]>();
         public Double cursorX;public int inputStart,inputCount,fullInputCount,extraRows;
+    }
+    private double[] mathSpacing(int[] p,List<Integer> members,int left,int right) {
+        int width=right-left;if(width<=0 || width>4096)return new double[0];
+        boolean[] occupied=new boolean[width];
+        for(int i:members) {
+            int x=p[i],kind=p[i+2],begin=kind==6?x:Math.min(x,p[i+3]),end=kind==6?x+p[i+5]:Math.max(x,p[i+3])+1;
+            for(int column=Math.max(left,begin);column<Math.min(right,end);column++)
+                if(kind==6 || p[i+1]!=p[i+4] || column==begin || column==end-1)occupied[column-left]=true;
+        }
+        double[] map=new double[width+1];int column=0;double position=left;map[0]=position;
+        while(column<width) {
+            int end=column+1;if(!occupied[column])while(end<width && !occupied[end])end++;
+            int length=end-column;double step=occupied[column]?1:Math.max(1,length*0.5)/length;
+            while(column<end){position+=step;map[++column]=position;}
+        }
+        return map;
+    }
+    private double[] verticalSpacing(int[] p,List<Integer> members,int top,int bottom) {
+        int height=bottom-top;if(height<=0 || height>4096)return new double[0];
+        List<Integer> shapes=new ArrayList<Integer>();
+        for(int i:members)if(p[i+2]==6 && p[i+7]==3 && (p[i+3]==40 || p[i+3]==41 || p[i+3]==189))shapes.add(i);
+        boolean[] occupied=new boolean[height];
+        for(int i:members) {
+            int kind=p[i+2],y=p[i+1],begin=kind==6?y:Math.min(y,p[i+4]),end=kind==6?y+p[i+6]:Math.max(y,p[i+4])+1;
+            boolean duplicate=false;
+            if(kind==7)for(int j:shapes)if(Math.min(p[i],p[i+3])>=p[j] && Math.max(p[i],p[i+3])<p[j]+p[j+5] && begin>=p[j+1] && end<=p[j+1]+p[j+6]){duplicate=true;break;}
+            if(duplicate)continue;
+            boolean elastic=shapes.contains(i);
+            for(int row=Math.max(top,begin);row<Math.min(bottom,end);row++)if(!elastic || row<begin+2 || row>=end-2)occupied[row-top]=true;
+        }
+        double[] map=new double[height+1];int row=0;double position=top;map[0]=position;
+        while(row<height){int end=row+1;if(!occupied[row])while(end<height && !occupied[end])end++;
+            int length=end-row;double step=occupied[row]?1:Math.max(0.5,length*0.5)/length;
+            while(row<end){position+=step;map[++row]=position;}}
+        return map;
+    }
+    private static double packed(double x,double left,double[] map) {
+        int index=(int)x-(int)left;return index>=0 && index<map.length?map[index]:x;
+    }
+    private static double inputAdvance(int code) {
+        if(code==32)return 3.2;
+        switch(code){case 33:case 39:case 44:case 46:case 58:case 59:case 73:case 105:case 108:case 124:return 3.6;case 40:case 41:return 3.9;default:return 4.5;}
     }
     private int compactStart,compactEditor=-1;
     public CompactScene compactScene(int[] packets) {
@@ -200,16 +244,26 @@ public final class SharpTextRecognizer {
                 members.add(i);left=Math.min(left,packets[i]);right=Math.max(right,packets[i+2]==7?Math.max(packets[i],packets[i+3])+1:packets[i]+packets[i+5]);
             }
             if(members.isEmpty() || members.size()!=packets[h+5])continue;
-            double anchor=scene.yEditor?0:(left>80 && right<=162?159:8),scale=0.72;boolean inverse=packets[h+4]!=0;
+            boolean output=!scene.yEditor && (packets[h+7]==1 || (packets[h+7]==0 && right>=158 && right<=162));
+            double anchor=scene.yEditor?0:8,scale=0.72;boolean inverse=packets[h+4]!=0;
+            double[] map=mathSpacing(packets,members,(int)left,(int)right);
+            boolean fitsOutput=output && (packed(right,left,map)-packed(left,left,map))*scale<=152;
+            // One translation applies equally to glyphs, rules and selection.
+            double shift=fitsOutput?160-(packed(right,left,map)-anchor)*scale-anchor:0;
+            double top=Double.MAX_VALUE,bottom=-Double.MAX_VALUE;
+            for(int i:members){top=Math.min(top,packets[i+2]==7?Math.min(packets[i+1],packets[i+4]):packets[i+1]);bottom=Math.max(bottom,packets[i+2]==7?Math.max(packets[i+1],packets[i+4])+1:packets[i+1]+packets[i+6]);}
+            double[] vertical=verticalSpacing(packets,members,(int)top,(int)bottom);
+            double yAnchor=scene.yEditor?top:bottom;
+            if(scene.yEditor)for(int i=0;i+11<packets.length;i+=12)if((packets[i+2]==1 || packets[i+2]==11) && packets[i]>=19 && packets[i]<=31 && packets[i]<left && packets[i+3]==61 && packets[i+1]>=top && packets[i+1]<bottom){yAnchor=packets[i+1];break;}
+            double yShift=yAnchor-packed(yAnchor,top,vertical);
+            scene.verticalSaved+=(bottom-top-(packed(bottom,top,vertical)-packed(top,top,vertical)))*scale;
+            if(!scene.yEditor && !output && left<40)for(int row=Math.max(16,(int)top);row<Math.min(83,(int)bottom);row++)scene.markerOffsets[row-16]=(packed(row,top,vertical)+yShift-row)*scale;
+
             scene.body=true;
             if(inverse) {
-                double top=Double.MAX_VALUE,bottom=-Double.MAX_VALUE;
-                for(int i:members) {top=Math.min(top,packets[i+1]);bottom=Math.max(bottom,packets[i+2]==7?Math.max(packets[i+1],packets[i+4])+1:packets[i+1]+packets[i+6]);}
-                scene.inverseRects.add(new double[]{anchor+(left-anchor)*scale-0.5,base+(top-base)*scale,(right-left)*scale+0.5,(bottom-top)*scale});
+                scene.inverseRects.add(new double[]{anchor+(packed(left,left,map)-anchor)*scale+shift-0.5,base+(packed(top,top,vertical)+yShift-base)*scale,(packed(right,left,map)-packed(left,left,map))*scale+0.5,(packed(bottom,top,vertical)-packed(top,top,vertical))*scale});
             }
             if(scene.yEditor) {
-                double top=Double.MAX_VALUE,bottom=-Double.MAX_VALUE;
-                for(int i:members){top=Math.min(top,packets[i+1]);bottom=Math.max(bottom,packets[i+2]==7?Math.max(packets[i+1],packets[i+4])+1:packets[i+1]+packets[i+6]);}
                 scene.eraseRects.add(new double[]{left,top,right-left,bottom-top,inverse?1:0});
             }
             for(int i:members) {
@@ -218,13 +272,13 @@ public final class SharpTextRecognizer {
                     if(packets[j+2]==6 && packets[j+7]==3 && packets[i]>=packets[j] && packets[i]<packets[j]+packets[j+5]
                         && Math.min(packets[i+1],packets[i+4])>=packets[j+1] && Math.max(packets[i+1],packets[i+4])<packets[j+1]+packets[j+6]) {stem=true;break;}
                 if(stem)continue;
-                double x=anchor+(packets[i]-anchor)*scale,y=base+(packets[i+1]-base)*scale;
+                double x=anchor+(packed(packets[i],left,map)-anchor)*scale+shift,y=base+(packed(packets[i+1],top,vertical)+yShift-base)*scale;
                 if(packets[i+2]==6) {
                     Glyph g=compactGlyph(packets[i+7],packets[i+3],packets[i+5],packets[i+6]);if(g==null)continue;
-                    CompactItem item=new CompactItem(x,y,scale,inverse,g);if(scene.yEditor)item.clipTop=21.04;scene.items.add(item);
+                    CompactItem item=new CompactItem(x,y,scale,inverse,g);if(packets[i+7]==3)item.heightScale=(packed(packets[i+1]+packets[i+6],top,vertical)-packed(packets[i+1],top,vertical))/packets[i+6];if(scene.yEditor)item.clipTop=21.04;scene.items.add(item);
                 }else {
                     CompactItem item=new CompactItem(x,y,scale,inverse,null);
-                    item.x1=anchor+(packets[i+3]-anchor)*scale;item.y1=base+(packets[i+4]-base)*scale;item.attribute=packets[i+5];if(scene.yEditor)item.clipTop=21.04;scene.items.add(item);
+                    item.x1=anchor+(packed(packets[i+3],left,map)-anchor)*scale+shift;item.y1=base+(packed(packets[i+4],top,vertical)+yShift-base)*scale;item.attribute=packets[i+5];if(scene.yEditor)item.clipTop=21.04;scene.items.add(item);
                 }
             }
         }
@@ -247,12 +301,17 @@ public final class SharpTextRecognizer {
             for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==9)count++;
             if(n<0 || n>512 || cur<0 || cur>n || count!=n)break;
             boolean yInput=packets[h+6]==1;double left=yInput?packets[h+8]*0.75:1;
-            int slots=Math.max(1,(int)((160-left-0.5-6*0.8)/4.5)+1),id=packets[h+7];
+            double[] advances=new double[n],positions=new double[n+1];java.util.Arrays.fill(advances,4.5);
+            for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==9){int index=packets[i];if(index<0 || index>=n)return scene;advances[index]=inputAdvance(packets[i+3]);}
+            for(int index=0;index<n;index++)positions[index+1]=positions[index]+advances[index];
+            double available=159-left;int id=packets[h+7];
             if(compactEditor!=id){compactEditor=id;compactStart=0;}
-            compactStart=Math.min(compactStart,Math.max(0,n-(slots-1)));
+            compactStart=Math.min(compactStart,n);
             if(cur<compactStart)compactStart=cur;
-            if(cur>compactStart+slots-1)compactStart=cur-(slots-1);
-            int start=compactStart,end=Math.min(n,start+slots);
+            while(compactStart<cur && positions[cur]-positions[compactStart]>available)compactStart++;
+            while(compactStart>0 && positions[n]-positions[compactStart-1]<=available)compactStart--;
+            int start=compactStart,end=start;
+            while(end<n && positions[end]-positions[start]+Math.max(advances[end],4.5)<=available)end++;
             if(yInput)for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==1 && packets[i+1]==85 && packets[i]<packets[h+8]) {
                 Glyph g=compactGlyph(1,packets[i+3],0,0);if(g!=null)scene.items.add(new CompactItem(0.5+packets[i]*0.75,85.8,0.8,packets[i+4]!=0,g));
             }
@@ -261,9 +320,9 @@ public final class SharpTextRecognizer {
                 int index=packets[i];if(index<start || index>=end)continue;
                 Glyph g=compactGlyph(1,packets[i+3],0,0);if(g==null)continue;
                 boolean inverse=(flags&32)!=0 && (flags&512)!=0 && index>=Math.min(selection,cur) && index<Math.max(selection,cur);
-                scene.items.add(new CompactItem(left+0.5+(index-start)*4.5,85.8,0.8,inverse,g));
+                CompactItem item=new CompactItem(left+positions[index]-positions[start]+(advances[index]-g.width*0.8)/2,85.8,0.8,inverse,g);item.advance=advances[index];item.selectionX=left+positions[index]-positions[start];scene.items.add(item);
             }
-            scene.cursorX=left+(cur-start)*4.5;
+            scene.cursorX=left+positions[cur]-positions[start];
             break;
         }
         if(!scene.input){compactEditor=-1;compactStart=0;}

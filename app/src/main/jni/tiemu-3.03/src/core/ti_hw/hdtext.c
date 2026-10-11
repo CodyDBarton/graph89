@@ -21,7 +21,7 @@ static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static Port ports[MAX_PORTS];
 static Saved saves[MAX_SAVES];
 typedef struct { int kind,x,y,x1,y1,font,code,w,h,attr; } Primitive;
-typedef struct { uint32_t return_pc;int count,complete;Primitive items[512]; } Expression;
+typedef struct { uint32_t return_pc;int count,complete,alignment;Primitive items[512]; } Expression;
 static Expression expressions[16];static int expression_next,expression_active=-1;
 static uint32_t editor,heap_slot,print_expr,clip_line,draw_pix,win_clear,te_calls[5];
 static int next_save, ready;
@@ -206,6 +206,16 @@ void hdtext_observe(uint32_t pc) {
         if(win+28<tihw.ram_size && byte_at(win+17)==16 && byte_at(win+16)==0 && byte_at(win+18)==159) {
             int slot=expression_next++%16;Expression *e=&expressions[slot];memset(e,0,sizeof *e);
             e->return_pc=long_at(a-4);watch(e->return_pc);expression_active=slot;
+            /* AMS Home passes its input/result flag to Parse2DMultiExpr immediately
+               before Print2DExpr. Verify the caller instructions before reading
+               that leftover stack word; Y= and unknown ROM callers stay unknown. */
+            uint32_t call=e->return_pc-24;
+            if(word_at(call)==0x3e83 && word_at(call+2)==0x3f06 && word_at(call+4)==0x4eb9
+                && long_at(call+6)==rom_call(0x4b) && word_at(call+10)==0x3e84
+                && word_at(call+12)==0x3f05 && word_at(call+14)==0x2f0d
+                && word_at(call+16)==0x2f08 && word_at(call+18)==0x4eb9
+                && long_at(call+20)==print_expr && word_at(a+12)<=1)
+                e->alignment=word_at(a+12)==0?1:2;
         }
     }
     if(pc==clip_line && expression_active>=0) {
@@ -243,7 +253,7 @@ void hdtext_observe(uint32_t pc) {
             c.left=x;c.top=y;c.right=right+1;c.bottom=bottom+1;
         }
         remember_primitive((Primitive){.x=c.x+(c.font<2),.y=c.y,.font=c.font,.code=c.code,.w=c.w,.h=c.h,.attr=c.attr});
-        if(y_capture && expression_active<0 && address==tihw.lcd_adr && c.y>=83 && y_extra_count<128)y_extra[y_extra_count++]=c;
+        if(y_capture && expression_active<0 && address==tihw.lcd_adr && c.y+c.h>83 && y_extra_count<128)y_extra[y_extra_count++]=c;
         insert(p,c);
     } else if(pc==draw_str) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+8);uint32_t s=long_at(a+4);
@@ -444,7 +454,7 @@ int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
             }
             if(!matched && !(screen==2 && y_complete))continue; /* Completed Y= paint passes include deliberately clipped extra rows. */
             inv=inv*2>matched;
-            int32_t header[12]={0,0,5,k,inv,e->count,0,0,0,16,160,83};memcpy(out+count++*12,header,sizeof header);
+            int32_t header[12]={0,0,5,k,inv,e->count,0,e->alignment,0,16,160,83};memcpy(out+count++*12,header,sizeof header);
             for(int j=0;j<e->count;j++) {
                 Primitive q=e->items[j];int32_t v[12]={q.x,q.y,q.kind?7:6,q.kind?q.x1:q.code,q.kind?q.y1:inv,q.kind?q.attr:q.w,q.h,q.font,k,16,160,83};
                 memcpy(out+count++*12,v,sizeof v);

@@ -71,14 +71,83 @@ final class SharpTextRecognizer {
     struct CompactItem {
         let x:Double,y:Double,scale:Double,inverse:Bool,glyph:Glyph?
         var x1=0.0,y1=0.0,attribute=1
+        var heightScale=1.0
         var clipTop=16.0
+        var advance=4.5
+        var selectionX:Double?=nil
     }
     struct CompactScene {
         var body=false,input=false,yEditor=false,items:[CompactItem]=[]
+        var markerOffsets=Array(repeating:0.0,count:67)
+        var verticalSaved=0.0
+        var alignedOutputs=0
         var eraseRects:[[Double]]=[]
         var inverseRects:[[Double]]=[]
         var cursorX:Double?=nil
         var inputStart=0,inputCount=0,fullInputCount=0,extraRows=0
+    }
+    // Protect complete glyph cells and diagonal/vertical graphics. Only empty
+    // horizontal gutters are reduced; fraction bars follow the same coordinate
+    // map as their contents. Glyph outlines and vertical layout stay unchanged.
+    private func mathSpacing(_ packets:[Int32],_ members:[Int],_ left:Int,_ right:Int) -> [Double] {
+        let width=right-left
+        guard width>0,width<=4096 else {return []}
+        var occupied=Array(repeating:false,count:width)
+        for i in members {
+            let x=Int(packets[i]),kind=packets[i+2]
+            let end=kind==6 ? x+Int(packets[i+5]):max(x,Int(packets[i+3]))+1
+            let begin=kind==6 ? x:min(x,Int(packets[i+3]))
+            for column in max(left,begin)..<max(max(left,begin),min(right,end)) {
+                if kind==6 || packets[i+1] != packets[i+4] || column==begin || column==end-1 {occupied[column-left]=true}
+            }
+        }
+        var map=Array(repeating:0.0,count:width+1),column=0,position=Double(left)
+        map[0]=position
+        while column<width {
+            var end=column+1
+            if !occupied[column] {while end<width && !occupied[end] {end += 1}}
+            let length=end-column
+            let step=occupied[column] ? 1.0:max(1.0,Double(length)*0.5)/Double(length)
+            while column<end {position += step;column += 1;map[column]=position}
+        }
+        return map
+    }
+    // Ordinary glyph cells and oblique graphics retain their complete height.
+    // Tall delimiters are elastic; their duplicate raster stems must not veto
+    // the gaps inside the enclosed fraction. Keep half a unit of separation.
+    private func verticalSpacing(_ p:[Int32],_ members:[Int],_ top:Int,_ bottom:Int) -> [Double] {
+        let height=bottom-top
+        guard height>0,height<=4096 else {return []}
+        let shapes=members.filter {p[$0+2]==6 && p[$0+7]==3 && [40,41,189].contains(p[$0+3])}
+        var occupied=Array(repeating:false,count:height)
+        for i in members {
+            let kind=p[i+2],y=Int(p[i+1]),begin=kind==6 ? y:min(y,Int(p[i+4]))
+            let end=kind==6 ? y+Int(p[i+6]):max(y,Int(p[i+4]))+1
+            if kind==7 && shapes.contains(where:{j in
+                min(p[i],p[i+3])>=p[j] && max(p[i],p[i+3])<p[j]+p[j+5] &&
+                begin>=Int(p[j+1]) && end<=Int(p[j+1]+p[j+6])
+            }) {continue}
+            let elastic=shapes.contains(i)
+            for row in max(top,begin)..<max(max(top,begin),min(bottom,end)) {
+                if !elastic || row<begin+2 || row>=end-2 {occupied[row-top]=true}
+            }
+        }
+        var map=Array(repeating:0.0,count:height+1),row=0,position=Double(top)
+        map[0]=position
+        while row<height {
+            var end=row+1
+            if !occupied[row] {while end<height && !occupied[end] {end += 1}}
+            let length=end-row
+            let step=occupied[row] ? 1.0:max(0.5,Double(length)*0.5)/Double(length)
+            while row<end {position += step;row += 1;map[row]=position}
+        }
+        return map
+    }
+    private func inputAdvance(_ code:Int) -> Double {
+        if code==32 {return 3.2}
+        if [33,39,44,46,58,59,73,105,108,124].contains(code) {return 3.6}
+        if code==40 || code==41 {return 3.9}
+        return 4.5
     }
     private var compactStart=0,compactEditor:Int32 = -1
     func compactScene(_ packets:[Int32]) -> CompactScene {
@@ -94,13 +163,47 @@ final class SharpTextRecognizer {
             guard !members.isEmpty,members.count==Int(packets[header+5]) else { continue }
             let left=members.map { Double(packets[$0]) }.min() ?? 0
             let right=members.map { Double(packets[$0+2]==7 ? max(packets[$0],packets[$0+3])+1 : packets[$0]+packets[$0+5]) }.max() ?? 160
-            let anchor=scene.yEditor ? 0.0:(left>80 && right<=162 ? 159.0:8.0)
+            let output = !scene.yEditor && (packets[header+7]==1 || (packets[header+7]==0 && right>=158 && right<=162))
+            let anchor=scene.yEditor ? 0.0:8.0
             let scale=0.72,inverse=packets[header+4] != 0
+            let map=mathSpacing(packets,members,Int(left),Int(right))
+            func packed(_ x:Double) -> Double {
+                let index=Int(x)-Int(left)
+                return index>=0 && index<map.count ? map[index]:x
+            }
+            // Only answers that fit are right aligned. Wider answers retain their
+            // native left/scroll position so their beginning stays accessible.
+            let fitsOutput=output && (packed(right)-packed(left))*scale<=152
+            if fitsOutput { scene.alignedOutputs += 1 }
+            func placed(_ x:Double) -> Double {
+                fitsOutput ? 160+(packed(x)-packed(right))*scale:anchor+(packed(x)-anchor)*scale
+            }
+            let top=members.map {Double(packets[$0+2]==7 ? min(packets[$0+1],packets[$0+4]):packets[$0+1])}.min() ?? 16
+            let bottom=members.map {Double(packets[$0+2]==7 ? max(packets[$0+1],packets[$0+4])+1:packets[$0+1]+packets[$0+6])}.max() ?? 83
+            let vertical=verticalSpacing(packets,members,Int(top),Int(bottom))
+            func packedY(_ y:Double) -> Double {
+                let index=Int(y)-Int(top)
+                return index>=0 && index<vertical.count ? vertical[index]:y
+            }
+            let label=records.first { i in
+                (packets[i+2]==1 || packets[i+2]==11) && packets[i]>=19 && packets[i]<=31 && Double(packets[i])<left && packets[i+3]==61 && Double(packets[i+1])>=top && Double(packets[i+1])<bottom
+            }
+            let yAnchor=scene.yEditor ? label.map {Double(packets[$0+1])} ?? top:bottom
+            let yShift=yAnchor-packedY(yAnchor)
+            scene.verticalSaved += (bottom-top-(packedY(bottom)-packedY(top)))*scale
+            func placedY(_ y:Double) -> Double {base+(packedY(y)+yShift-base)*scale}
+            if !scene.yEditor && !output && left<40 {
+                for row in max(16,Int(top))..<max(max(16,Int(top)),min(83,Int(bottom))) {
+                    scene.markerOffsets[row-16]=(packedY(Double(row))+yShift-Double(row))*scale
+                }
+            }
+
+
             scene.body=true
             if inverse {
                 let top=members.map { Double($0+1<packets.count ? packets[$0+1]:0) }.min() ?? 16
                 let bottom=members.map { Double(packets[$0+2]==7 ? max(packets[$0+1],packets[$0+4])+1 : packets[$0+1]+packets[$0+6]) }.max() ?? 83
-                scene.inverseRects.append([anchor+(left-anchor)*scale-0.5,base+(top-base)*scale,(right-left)*scale+0.5,(bottom-top)*scale])
+                scene.inverseRects.append([placed(left)-0.5,placedY(top),(packed(right)-packed(left))*scale+0.5,(packedY(bottom)-packedY(top))*scale])
             }
             if scene.yEditor {
                 let top=members.map { Double(packets[$0+1]) }.min() ?? 16
@@ -114,15 +217,16 @@ final class SharpTextRecognizer {
                     packets[j+2]==6 && packets[j+7]==3 && packets[i]>=packets[j] && packets[i]<packets[j]+packets[j+5] &&
                     min(packets[i+1],packets[i+4])>=packets[j+1] && max(packets[i+1],packets[i+4])<packets[j+1]+packets[j+6]
                 }) { continue }
-                let x=anchor+(Double(packets[i])-anchor)*scale,y=base+(Double(packets[i+1])-base)*scale
+                let x=placed(Double(packets[i])),y=placedY(Double(packets[i+1]))
                 if packets[i+2]==6 {
                     guard let g=compactGlyph(Int(packets[i+7]),Int(packets[i+3]),Int(packets[i+5]),Int(packets[i+6])) else { continue }
                     var item=CompactItem(x:x,y:y,scale:scale,inverse:inverse,glyph:g)
+                    if packets[i+7]==3 {item.heightScale=(packedY(Double(packets[i+1]+packets[i+6]))-packedY(Double(packets[i+1])))/Double(packets[i+6])}
                     if scene.yEditor {item.clipTop=21.04}
                     scene.items.append(item)
                 } else {
                     var item=CompactItem(x:x,y:y,scale:scale,inverse:inverse,glyph:nil,
-                        x1:anchor+(Double(packets[i+3])-anchor)*scale,y1:base+(Double(packets[i+4])-base)*scale,attribute:Int(packets[i+5]))
+                        x1:placed(Double(packets[i+3])),y1:placedY(Double(packets[i+4])),attribute:Int(packets[i+5]))
                     if scene.yEditor {item.clipTop=21.04}
                     scene.items.append(item)
                 }
@@ -148,17 +252,24 @@ final class SharpTextRecognizer {
             let n=Int(packets[h+5]),cursor=Int(packets[h]),flags=Int(packets[h+3]),selection=Int(packets[h+4])
             let chars=records.filter { packets[$0+2]==9 }
             guard (0...512).contains(n),cursor>=0,cursor<=n,chars.count==n else { return scene }
-            // Reserve one slot for the caret; unlike the ROM's StartOffset,
-            // this viewport is based on 35 compact characters rather than 26.
             let yInput=packets[h+6]==1
             let left=yInput ? Double(packets[h+8])*0.75:1.0
-            let slots=max(1,Int((160-left-0.5-6*0.8)/4.5)+1)
+            var advances=Array(repeating:4.5,count:n)
+            for i in chars {let index=Int(packets[i]);guard index>=0,index<n else {return scene};advances[index]=inputAdvance(Int(packets[i+3]))}
+            var positions=Array(repeating:0.0,count:n+1)
+            for index in 0..<n {positions[index+1]=positions[index]+advances[index]}
+            let available=159-left
             let id=packets[h+7]
             if compactEditor != id {compactEditor=id;compactStart=0}
-            compactStart=min(compactStart,max(0,n-(slots-1)))
+            compactStart=min(compactStart,n)
             if cursor<compactStart {compactStart=cursor}
-            if cursor>compactStart+slots-1 {compactStart=cursor-(slots-1)}
-            let start=compactStart,end=min(n,start+slots)
+            while compactStart<cursor && positions[cursor]-positions[compactStart]>available {compactStart += 1}
+            // When deleting at the end, fill newly available space. Moving the
+            // caret alone never scrolls while it remains within this viewport.
+            while compactStart>0 && positions[n]-positions[compactStart-1]<=available {compactStart -= 1}
+            let start=compactStart
+            var end=start
+            while end<n && positions[end]-positions[start]+max(advances[end],4.5)<=available {end += 1}
             if yInput {
                 for i in records where packets[i+2]==1 && packets[i+1]==85 && packets[i]<packets[h+8] {
                     if let g=compactGlyph(1,Int(packets[i+3])) {
@@ -170,9 +281,12 @@ final class SharpTextRecognizer {
             for i in chars {
                 let index=Int(packets[i]);guard index>=start,index<end,let g=compactGlyph(1,Int(packets[i+3])) else { continue }
                 let inverse=flags&32 != 0 && flags&512 != 0 && index>=min(selection,cursor) && index<max(selection,cursor)
-                scene.items.append(CompactItem(x:left+0.5+Double(index-start)*4.5,y:85.8,scale:0.8,inverse:inverse,glyph:g))
+                var item=CompactItem(x:left+positions[index]-positions[start]+(advances[index]-Double(g.width)*0.8)/2,y:85.8,scale:0.8,inverse:inverse,glyph:g)
+                item.advance=advances[index]
+                item.selectionX=left+positions[index]-positions[start]
+                scene.items.append(item)
             }
-            scene.cursorX=left+Double(cursor-start)*4.5
+            scene.cursorX=left+positions[cursor]-positions[start]
         }
         if !scene.input {compactEditor = -1;compactStart=0}
         return scene

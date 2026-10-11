@@ -153,7 +153,12 @@ final class SharpTextRenderer {
             background.setColor(on);canvas.drawPath(raster,background);
         }else if(scene.body) {
             background.setColor(on);
-            for(int y=16;y<83;y++)for(int x=0;x<6;x++)if(pixels[y*160+x])canvas.drawRect(x,83+(y-83)*0.72f,x+1,83+(y-82)*0.72f,background);
+            for(int x=0;x<6;x++)for(int y=16;y<83;) {
+                if(!pixels[y*160+x]){y++;continue;}
+                int top=y;while(y<83 && pixels[y*160+x])y++;
+                float offset=(float)scene.markerOffsets[(top+y)/2-16];
+                canvas.drawRect(x,83+(top-83)*0.72f+offset,x+1,83+(y-83)*0.72f+offset,background);
+            }
         }
         int bodyClip=canvas.save();canvas.clipRect(0,scene.yEditor?21.04f:16,160,83);background.setColor(on);
         for(double[] r:scene.inverseRects)canvas.drawRect((float)r[0],(float)r[1],(float)(r[0]+r[2]),(float)(r[1]+r[3]),background);
@@ -161,14 +166,14 @@ final class SharpTextRenderer {
         for(SharpTextRecognizer.CompactItem item:scene.items)if(item.inverse && item.glyph!=null && item.scale==0.8) {
             int clip=canvas.save();canvas.clipRect(0,item.scale==0.8?84:(float)item.clipTop,160,item.scale==0.8?93:83);
             background.setColor(on);
-            canvas.drawRect((float)item.x-0.5f,(float)item.y,(float)(item.x+(item.scale==0.8?4.5:(item.glyph.width+1)*item.scale)-0.5),(float)(item.y+item.glyph.height*item.scale),background);
+            canvas.drawRect((float)(item.selectionX==null?item.x-0.5:item.selectionX),(float)item.y,(float)((item.selectionX==null?item.x-0.5:item.selectionX)+item.advance),(float)(item.y+item.glyph.height*item.scale),background);
             canvas.restoreToCount(clip);
         }
         for(SharpTextRecognizer.CompactItem item:scene.items) {
             int clip=canvas.save();canvas.clipRect(0,item.scale==0.8?84:(float)item.clipTop,160,item.scale==0.8?93:83);
             ink.setColor(item.inverse?off:on);
             if(item.glyph!=null) {
-                SharpTextRecognizer.Glyph g=item.glyph;canvas.translate((float)item.x,(float)item.y);canvas.scale((float)item.scale,(float)item.scale);
+                SharpTextRecognizer.Glyph g=item.glyph;canvas.translate((float)item.x,(float)item.y);canvas.scale((float)item.scale,(float)(item.scale*item.heightScale));
                 if(g.character!=0)canvas.drawPath(outline(g),ink);
                 else for(int y=0;y<g.height;y++)for(int x=0;x<g.width;x++)if((g.rows[y]&(1<<(g.width-x-1)))!=0)canvas.drawRect(x,y,x+1,y+1,ink);
             }else if(item.attribute!=0) {

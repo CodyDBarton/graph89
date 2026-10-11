@@ -56,8 +56,11 @@ final class SharpTextView: UIView {
             }
             if ProcessInfo.processInfo.arguments.contains("--ui-test-compact-layout") {
                 let scene=recognizer.compactScene(retained)
+                let edgeLabels=stride(from:0,to:retained.count-retained.count%12,by:12).filter {retained[$0+2]==11 && retained[$0+1]<83 && retained[$0+1]+retained[$0+6]>83 && [121,61].contains(retained[$0+3])}.count
                 let beyond=scene.items.filter { $0.glyph != nil && $0.scale==0.72 && $0.x>118 && $0.x<160 }.count
-                accessibilityValue="on:\(cells.count);compact:\(compact ? 1:0),input:\(scene.inputCount),full:\(scene.fullInputCount),body:\(scene.body ? 1:0),start:\(scene.inputStart),caret:\(scene.cursorX ?? -1),yeditor:\(scene.yEditor ? 1:0),extra:\(scene.extraRows),beyond:\(beyond)"
+                let outputIDs=Set(stride(from:0,to:retained.count,by:12).filter {retained[$0+2]==5 && retained[$0+7]==1}.map {retained[$0+3]})
+                let answerLeft=stride(from:0,to:retained.count,by:12).filter {retained[$0+2]==6 && outputIDs.contains(retained[$0+8])}.map {retained[$0]}.min() ?? -1
+                accessibilityValue="on:\(cells.count);compact:\(compact ? 1:0),input:\(scene.inputCount),full:\(scene.fullInputCount),body:\(scene.body ? 1:0),start:\(scene.inputStart),caret:\(scene.cursorX ?? -1),yeditor:\(scene.yEditor ? 1:0),extra:\(scene.extraRows),beyond:\(beyond),vsaved:\(scene.verticalSaved),edgeLabels:\(edgeLabels),answers:\(scene.alignedOutputs),answerLeft:\(answerLeft)"
             }
             let clipped=cells.filter { $0.y<$0.clipTop || $0.y+$0.glyph.height>$0.clipBottom || $0.x<$0.clipLeft || $0.x+$0.glyph.width>$0.clipRight }
             if ProcessInfo.processInfo.arguments.contains("--ui-test-clipped-math") {
@@ -140,7 +143,7 @@ final class SharpTextView: UIView {
                     if !pixels[y*160+x] { y += 1;continue }
                     let top=y
                     while y<83 && pixels[y*160+x] { y += 1 }
-                    markers.addRect(CGRect(x:Double(x),y:83+Double(top-83)*0.72,width:1,height:Double(y-top)*0.72))
+                    markers.addRect(CGRect(x:Double(x),y:83+Double(top-83)*0.72+scene.markerOffsets[(top+y)/2-16],width:1,height:Double(y-top)*0.72))
                 }
             }
             context.addPath(markers);context.fillPath()
@@ -153,7 +156,7 @@ final class SharpTextView: UIView {
             let g=item.glyph!
             context.saveGState();context.clip(to:CGRect(x:0,y:item.y>=84 ? 84:16,width:160,height:item.y>=84 ? 9:67))
             context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor)
-            context.fill(CGRect(x:item.x-0.5,y:item.y,width:item.scale==0.8 ? 4.5:Double(g.width+1)*item.scale,height:Double(g.height)*item.scale))
+            context.fill(CGRect(x:item.selectionX ?? item.x-0.5,y:item.y,width:item.advance,height:Double(g.height)*item.scale))
             context.restoreGState()
         }
         for item in scene.items {
@@ -162,7 +165,7 @@ final class SharpTextView: UIView {
             let color=UIColor(white:(item.inverse ? 210:30)/255.0,alpha:1).cgColor
             context.setFillColor(color);context.setStrokeColor(color)
             if let g=item.glyph {
-                context.translateBy(x:item.x,y:item.y);context.scaleBy(x:item.scale,y:item.scale)
+                context.translateBy(x:item.x,y:item.y);context.scaleBy(x:item.scale,y:item.scale*item.heightScale)
                 if g.character != 0,let path=outline(g) { context.addPath(path);context.fillPath() }
                 else { for y in 0..<g.height { for x in 0..<g.width where g.rows[y]&(1<<(g.width-x-1)) != 0 { context.fill(CGRect(x:x,y:y,width:1,height:1)) } } }
             } else if item.attribute != 0 {

@@ -13,7 +13,8 @@ void hdtext_reset(void);
    x,y,font,ROM character,inverse,width,height,attribute,clip left,top,right,bottom (exclusive). Font 3 denotes
    a retained pretty-print shape (189 integral, 40/41 parentheses). Font 4 denotes the Home/Y= XOR cursor; inverse holds an eight-row blink mask.
    Full-content packets (Home and Y=):
-   5: expression header, code=group ID, inverse=selection, width=primitive count.
+   5: expression header, code=group ID, inverse=selection, width=primitive count,
+      attribute=Home alignment (0 unknown, 1 calculated output, 2 entered expression).
    6: full unclipped glyph, attribute=original font, clipLeft=group ID.
    7: line/pixel, code=x1, inverse=y1, width=attribute, clipLeft=group ID.
    8: editor header, x=cursor offset, y=ROM scroll offset, code=TE flags,
