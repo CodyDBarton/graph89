@@ -59,6 +59,7 @@ public final class SharpTextRecognizer {
             return s.toString();
         }
     }
+    private byte[] romBytes;
     private final Glyph[][] capturedGlyphs = new Glyph[3][256];
     private boolean graphFrame;
     private boolean[] disabledToolbar;
@@ -132,6 +133,7 @@ public final class SharpTextRecognizer {
         return textAnchor(c) || (c >= 0xe100 && specialCharacter(c - 0xe100) == c);
     }
     public SharpTextRecognizer(byte[] templates) {
+        romBytes = templates.clone();
         if (templates.length != 3 * 256 * 12) throw new IllegalArgumentException("Font templates");
         for (int f = 0; f < 3; ++f) {
             Map<Long, List<Glyph>> table = new HashMap<Long, List<Glyph>>();
@@ -159,6 +161,113 @@ public final class SharpTextRecognizer {
             }
             tables.add(table); widths.add(fontWidths);
         }
+    }
+    public Glyph compactGlyph(int f,int c,int w,int h) {
+        if(c<0 || c>=256)return null;
+        if(f>=0 && f<3) {
+            if(capturedGlyphs[f][c]!=null)return capturedGlyphs[f][c];
+            int off=(f*256+c)*12,width=romBytes[off]&255,height=romBytes[off+1]&255;
+            if(width<1 || width>8 || height<1 || height>10)return null;
+            int[] rows=new int[height];for(int y=0;y<height;y++)rows[y]=(romBytes[off+2+y]&255) >>> (8-width);
+            return new Glyph(f,width,height,(char)0,rows);
+        }
+        if(f!=3 || h<7 || h>512 || (c!=189 && c!=40 && c!=41) || w!=(c==189?5:3))return null;
+        String key="native:"+c+":"+h;Glyph g=delimiters.get(key);if(g!=null)return g;
+        int[] rows=new int[h];java.util.Arrays.fill(rows,c==189?4:c==40?4:1);
+        rows[0]=rows[h-1]=c==189?2:c==40?1:4;rows[1]=rows[h-2]=2;
+        if(c==189){rows[1]=5;rows[h-2]=20;rows[h-1]=8;}
+        g=new Glyph(1,w,h,c==189?specialCharacter(189):(char)c,rows,true);delimiters.put(key,g);return g;
+    }
+    public static final class CompactItem {
+        public double x,y,scale,x1,y1;public double clipTop=16;public boolean inverse;public Glyph glyph;public int attribute=1;
+        CompactItem(double x,double y,double scale,boolean inverse,Glyph glyph) {this.x=x;this.y=y;this.scale=scale;this.inverse=inverse;this.glyph=glyph;}
+    }
+    public static final class CompactScene {
+        public boolean body,input,yEditor;
+        public java.util.List<double[]> eraseRects=new ArrayList<double[]>();public java.util.List<CompactItem> items=new ArrayList<CompactItem>();
+        public java.util.List<double[]> inverseRects=new ArrayList<double[]>();
+        public Double cursorX;public int inputStart,inputCount,fullInputCount,extraRows;
+    }
+    private int compactStart,compactEditor=-1;
+    public CompactScene compactScene(int[] packets) {
+        CompactScene scene=new CompactScene();if(packets==null)return scene;
+        for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==10)scene.yEditor=true;
+        for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==11 && packets[i]==7 && packets[i+3]==121)scene.extraRows++;
+        scene.body=scene.yEditor;double base=scene.yEditor?16:83;
+        for(int h=0;h+11<packets.length;h+=12)if(packets[h+2]==5) {
+            List<Integer> members=new ArrayList<Integer>();double left=Double.MAX_VALUE,right=-Double.MAX_VALUE;
+            for(int i=0;i+11<packets.length;i+=12)if((packets[i+2]==6 || packets[i+2]==7) && packets[i+8]==packets[h+3]) {
+                members.add(i);left=Math.min(left,packets[i]);right=Math.max(right,packets[i+2]==7?Math.max(packets[i],packets[i+3])+1:packets[i]+packets[i+5]);
+            }
+            if(members.isEmpty() || members.size()!=packets[h+5])continue;
+            double anchor=scene.yEditor?0:(left>80 && right<=162?159:8),scale=0.72;boolean inverse=packets[h+4]!=0;
+            scene.body=true;
+            if(inverse) {
+                double top=Double.MAX_VALUE,bottom=-Double.MAX_VALUE;
+                for(int i:members) {top=Math.min(top,packets[i+1]);bottom=Math.max(bottom,packets[i+2]==7?Math.max(packets[i+1],packets[i+4])+1:packets[i+1]+packets[i+6]);}
+                scene.inverseRects.add(new double[]{anchor+(left-anchor)*scale-0.5,base+(top-base)*scale,(right-left)*scale+0.5,(bottom-top)*scale});
+            }
+            if(scene.yEditor) {
+                double top=Double.MAX_VALUE,bottom=-Double.MAX_VALUE;
+                for(int i:members){top=Math.min(top,packets[i+1]);bottom=Math.max(bottom,packets[i+2]==7?Math.max(packets[i+1],packets[i+4])+1:packets[i+1]+packets[i+6]);}
+                scene.eraseRects.add(new double[]{left,top,right-left,bottom-top,inverse?1:0});
+            }
+            for(int i:members) {
+                boolean stem=false;
+                if(packets[i+2]==7 && packets[i]==packets[i+3])for(int j:members)
+                    if(packets[j+2]==6 && packets[j+7]==3 && packets[i]>=packets[j] && packets[i]<packets[j]+packets[j+5]
+                        && Math.min(packets[i+1],packets[i+4])>=packets[j+1] && Math.max(packets[i+1],packets[i+4])<packets[j+1]+packets[j+6]) {stem=true;break;}
+                if(stem)continue;
+                double x=anchor+(packets[i]-anchor)*scale,y=base+(packets[i+1]-base)*scale;
+                if(packets[i+2]==6) {
+                    Glyph g=compactGlyph(packets[i+7],packets[i+3],packets[i+5],packets[i+6]);if(g==null)continue;
+                    CompactItem item=new CompactItem(x,y,scale,inverse,g);if(scene.yEditor)item.clipTop=21.04;scene.items.add(item);
+                }else {
+                    CompactItem item=new CompactItem(x,y,scale,inverse,null);
+                    item.x1=anchor+(packets[i+3]-anchor)*scale;item.y1=base+(packets[i+4]-base)*scale;item.attribute=packets[i+5];if(scene.yEditor)item.clipTop=21.04;scene.items.add(item);
+                }
+            }
+        }
+        if(scene.yEditor) {
+            for(int i=0;i+11<packets.length;i+=12)if(((packets[i+2]>=0 && packets[i+2]<=3 && packets[i+1]<83) || (packets[i+2]==11 && packets[i+1]<110)) && packets[i+1]>=16) {
+                double x=packets[i],y=packets[i+1];boolean grouped=false;
+                for(double[] r:scene.eraseRects)if(x>=r[0] && x<r[0]+r[2] && y>=r[1] && y<r[1]+r[3]){grouped=true;break;}
+                if(grouped)continue;
+                Glyph g=compactGlyph(packets[i+2]==11?packets[i+7]:packets[i+2],packets[i+3],packets[i+5],packets[i+6]);if(g==null)continue;
+                CompactItem item=new CompactItem(x*0.72,16+(y-16)*0.72,0.72,packets[i+4]!=0,g);
+                item.clipTop=16+(Math.max(16,packets[i+9])-16)*0.72;scene.items.add(item);
+            }
+            for(int i=0;i+11<packets.length;i+=12)if(((packets[i+2]>=0 && packets[i+2]<=3 && packets[i+1]<83) || (packets[i+2]==11 && packets[i+1]<110)) && packets[i+1]>=16) {
+                Glyph g=compactGlyph(packets[i+2]==11?packets[i+7]:packets[i+2],packets[i+3],packets[i+5],packets[i+6]);if(g==null || g.maxX<g.minX)continue;
+                scene.eraseRects.add(new double[]{packets[i]+g.minX,packets[i+1]+g.minY,g.maxX-g.minX+1,g.maxY-g.minY+1,packets[i+4]});
+            }
+        }
+        for(int h=0;h+11<packets.length;h+=12)if(packets[h+2]==8) {
+            int n=packets[h+5],cur=packets[h],flags=packets[h+3],selection=packets[h+4],count=0;
+            for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==9)count++;
+            if(n<0 || n>512 || cur<0 || cur>n || count!=n)break;
+            boolean yInput=packets[h+6]==1;double left=yInput?packets[h+8]*0.75:1;
+            int slots=Math.max(1,(int)((160-left-0.5-6*0.8)/4.5)+1),id=packets[h+7];
+            if(compactEditor!=id){compactEditor=id;compactStart=0;}
+            compactStart=Math.min(compactStart,Math.max(0,n-(slots-1)));
+            if(cur<compactStart)compactStart=cur;
+            if(cur>compactStart+slots-1)compactStart=cur-(slots-1);
+            int start=compactStart,end=Math.min(n,start+slots);
+            if(yInput)for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==1 && packets[i+1]==85 && packets[i]<packets[h+8]) {
+                Glyph g=compactGlyph(1,packets[i+3],0,0);if(g!=null)scene.items.add(new CompactItem(0.5+packets[i]*0.75,85.8,0.8,packets[i+4]!=0,g));
+            }
+            scene.input=true;scene.inputStart=start;scene.inputCount=end-start;scene.fullInputCount=n;
+            for(int i=0;i+11<packets.length;i+=12)if(packets[i+2]==9) {
+                int index=packets[i];if(index<start || index>=end)continue;
+                Glyph g=compactGlyph(1,packets[i+3],0,0);if(g==null)continue;
+                boolean inverse=(flags&32)!=0 && (flags&512)!=0 && index>=Math.min(selection,cur) && index<Math.max(selection,cur);
+                scene.items.add(new CompactItem(left+0.5+(index-start)*4.5,85.8,0.8,inverse,g));
+            }
+            scene.cursorX=left+(cur-start)*4.5;
+            break;
+        }
+        if(!scene.input){compactEditor=-1;compactStart=0;}
+        return scene;
     }
     /** Remove only a cursor positively identified by the native drawing call. */
     public static int[] cursor(int[] packets) {

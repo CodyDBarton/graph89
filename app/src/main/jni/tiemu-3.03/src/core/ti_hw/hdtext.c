@@ -1,4 +1,4 @@
-/* Retained identities from TI-68k drawing calls. No guest state is modified. */
+/* Retained TI-68k drawing identities, including bounded extra Y= layout rows. */
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -20,7 +20,14 @@ unsigned char hdtext_pages[65536];
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static Port ports[MAX_PORTS];
 static Saved saves[MAX_SAVES];
+typedef struct { int kind,x,y,x1,y1,font,code,w,h,attr; } Primitive;
+typedef struct { uint32_t return_pc;int count,complete;Primitive items[512]; } Expression;
+static Expression expressions[16];static int expression_next,expression_active=-1;
+static uint32_t editor,heap_slot,print_expr,clip_line,draw_pix,win_clear,te_calls[5];
 static int next_save, ready;
+static uint32_t y_list_start,y_list_finish;
+static int y_capture,y_complete,y_extra_count;
+static Cell y_extra[128];
 static uint32_t font_slot,port_slot,font_offsets[3];
 static uint32_t shape_sites[3],shape_finish,window_slot;
 static uint32_t draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear,rect_fill;
@@ -64,6 +71,10 @@ static void initialize(void) {
         memset(font_offsets,0,sizeof(font_offsets));
     }
     if(!font_offsets[0])return;
+    uint32_t heap=rom_call(0x96);
+    if(word_at(heap)==0x7000 && word_at(heap+2)==0x302f && word_at(heap+4)==4 && word_at(heap+6)==0xe588 && word_at(heap+8)==0x2079 && word_at(heap+14)==0x2070 && word_at(heap+16)==0x0800 && word_at(heap+18)==0x4e75)heap_slot=long_at(heap+10);
+    print_expr=rom_call(0x4c);clip_line=rom_call(0x193);draw_pix=rom_call(0x1a8);win_clear=rom_call(0x0c);
+    int ids[5]={0xa8,0xa9,0xac,0xb1,0xb3};for(int i=0;i<5;i++){te_calls[i]=rom_call(ids[i]);watch(te_calls[i]);}
     draw_char=rom_call(0x1a4);draw_clip=rom_call(0x191);draw_str=rom_call(0x1a9);
     bitmap_get=rom_call(0x185);bitmap_put=rom_call(0x187);
     scroll=rom_call(0x18b);shift=rom_call(0x18c);clear=rom_call(0x19e);rect_fill=rom_call(0x189);
@@ -96,9 +107,22 @@ static void initialize(void) {
         if(!target || (shape_finish && shape_finish!=target)){memset(shape_sites,0,sizeof(shape_sites));shape_finish=0;break;}
         shape_finish=target;
     }
+    /* Verified Y= paint-loop signature: WinHeight result in D6, selected row
+       geometry in the sheet at offsets 2A0/2A2. Extending only its local drawing
+       limit asks AMS to lay out extra real rows; its LCD clip remains unchanged. */
+    y_list_start=y_list_finish=0;int y_found=0;
+    for(uint32_t pos=0;pos+20<tihw.rom_size;pos+=2) {
+        uint32_t a=tihw.rom_base+pos;
+        if(long_at(a)!=0x3c00362a || long_at(a+4)!=0x02a23d6a || long_at(a+8)!=0x02a0ffe2 || long_at(a+12)!=0x3d6a02a8 || word_at(a+16)!=0xffe0)continue;
+        for(uint32_t end=a+300;end<a+600;end+=2)if(long_at(end)==0x4cee1c78 && long_at(end+4)==0xffe44e5e && word_at(end+8)==0x4e75) {
+            y_found++;y_list_start=a+2;y_list_finish=end;break;
+        }
+    }
+    if(y_found!=1)y_list_start=y_list_finish=0;
+    watch(y_list_start);watch(y_list_finish);
     watch(shape_finish);
     for(int k=0;k<3;k++)watch(shape_sites[k]);
-    uint32_t addresses[]={draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear,rect_fill};
+    uint32_t addresses[]={draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear,rect_fill,print_expr,clip_line,draw_pix,win_clear};
     for(unsigned i=0;i<sizeof(addresses)/sizeof(addresses[0]);i++)watch(addresses[i]);
 }
 static Port *port_for(uint32_t address,int create) {
@@ -143,11 +167,51 @@ static int same_bitmap(const Saved *s,uint32_t buffer) {
     }
     return 1;
 }
+static void remember_primitive(Primitive item) {
+    if(expression_active>=0) {
+        Expression *e=&expressions[expression_active];
+        if(e->count<512)e->items[e->count++]=item;else e->complete=-1;
+    }
+}
 void hdtext_observe(uint32_t pc) {
     if(!font_slot || !port_slot || !font_offsets[0])return;
     int font=byte_at(font_slot);if(font<0 || font>2)return;
     uint32_t address=long_at(port_slot),a=m68k_areg(regs,7)+4;
     Port *p=port_for(address,1);if(!p)return;
+    if(pc==y_list_start) {
+        uint32_t sheet=m68k_areg(regs,2),win=m68k_areg(regs,3);
+        y_capture=win==sheet+0x252 && win+28<tihw.ram_size && byte_at(win+16)==0 && byte_at(win+17)==16 && byte_at(win+18)==159 && byte_at(win+19)==82;
+        y_complete=0;y_extra_count=0;
+        if(y_capture && (m68k_dreg(regs,6)&65535)==67)
+            m68k_dreg(regs,6)=(m68k_dreg(regs,6)&0xffff0000)|93;
+    }
+    if(pc==y_list_finish && y_capture){y_capture=0;y_complete=1;}
+    if(expression_active>=0 && expressions[expression_active].return_pc==pc) {
+        Expression *e=&expressions[expression_active];if(e->complete>=0)e->complete=1;expression_active=-1;
+    }
+    for(int i=0;i<5;i++)if(pc==te_calls[i]) {
+        uint32_t te=long_at(a),parent=long_at(te);
+        if(te+38<tihw.ram_size && parent+28<tihw.ram_size && byte_at(parent+17)==83 && word_at(te+8)==2 && word_at(te+12)==9)editor=te;
+    }
+    if(pc==win_clear) {
+        uint32_t win=long_at(a);
+        /* Preserve entry/status/toolbar clears; a body clear or dialog must
+           invalidate compact history so it cannot paint over the new window. */
+        if(win<tihw.ram_size && win+28<tihw.ram_size && byte_at(win+17)<83 && byte_at(win+19)>=16) {
+            memset(expressions,0,sizeof(expressions));expression_active=-1;expression_next=0;y_complete=0;y_extra_count=0;
+        }
+    }
+    if(pc==print_expr && expression_active<0) {
+        uint32_t win=long_at(a+4);
+        if(win+28<tihw.ram_size && byte_at(win+17)==16 && byte_at(win+16)==0 && byte_at(win+18)==159) {
+            int slot=expression_next++%16;Expression *e=&expressions[slot];memset(e,0,sizeof *e);
+            e->return_pc=long_at(a-4);watch(e->return_pc);expression_active=slot;
+        }
+    }
+    if(pc==clip_line && expression_active>=0) {
+        uint32_t r=long_at(a);remember_primitive((Primitive){.kind=1,.x=(short)word_at(r),.y=(short)word_at(r+2),.x1=(short)word_at(r+4),.y1=(short)word_at(r+6),.attr=(short)word_at(a+8)});
+    }
+    if(pc==draw_pix && expression_active>=0)remember_primitive((Primitive){.kind=1,.x=(short)word_at(a),.y=(short)word_at(a+2),.x1=(short)word_at(a),.y1=(short)word_at(a+2),.attr=(short)word_at(a+4)});
     if(shape_finish && pc==shape_finish) {
         for(int i=0;i<p->count;i++)p->cells[i].pending=0;
         return;
@@ -160,7 +224,8 @@ void hdtext_observe(uint32_t pc) {
         if(k==0){x-=2;y-=h-2;}else {y-=2;}
         x+=byte_at(win+16);y+=byte_at(win+17);
         Cell c={x,y,3,k==0?189:k==1?40:41,1,byte_at(win+24),byte_at(win+25),byte_at(win+26)+1,byte_at(win+27)+1,k==0?5:3,h,1};
-        if(h>=7)insert(p,c);return;
+        if(h>512 && expression_active>=0)expressions[expression_active].complete=-1;
+        if(h>=7 && h<=512){remember_primitive((Primitive){.x=c.x,.y=c.y,.font=3,.code=c.code,.w=c.w,.h=c.h,.attr=c.attr});insert(p,c);}return;
     }
     if(pc==rect_fill) {
         uint32_t r=long_at(a);int x=byte_at(r),y=byte_at(r+1),right=byte_at(r+2),bottom=byte_at(r+3),attr=(short)word_at(a+8);
@@ -177,6 +242,8 @@ void hdtext_observe(uint32_t pc) {
             if(x<0 || y<0 || right<x || bottom<y)return;
             c.left=x;c.top=y;c.right=right+1;c.bottom=bottom+1;
         }
+        remember_primitive((Primitive){.x=c.x+(c.font<2),.y=c.y,.font=c.font,.code=c.code,.w=c.w,.h=c.h,.attr=c.attr});
+        if(y_capture && expression_active<0 && address==tihw.lcd_adr && c.y>=83 && y_extra_count<128)y_extra[y_extra_count++]=c;
         insert(p,c);
     } else if(pc==draw_str) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+8);uint32_t s=long_at(a+4);
@@ -218,16 +285,18 @@ void hdtext_run_begin(void) { pthread_mutex_lock(&lock);if(hdtext_active)initial
 void hdtext_run_end(void) { pthread_mutex_unlock(&lock); }
 void hdtext_enable(int enabled) {
     pthread_mutex_lock(&lock);
-    if(hdtext_active!=(enabled!=0)){memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));}
+    if(hdtext_active!=(enabled!=0)){memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));editor=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));}
     hdtext_active=enabled!=0;pthread_mutex_unlock(&lock);
 }
 void hdtext_reset(void) {
     pthread_mutex_lock(&lock);ready=0;font_slot=port_slot=window_slot=shape_finish=0;memset(shape_sites,0,sizeof(shape_sites));memset(font_offsets,0,sizeof(font_offsets));
+    editor=heap_slot=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));
     memset(hdtext_pages,0,sizeof(hdtext_pages));memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));next_save=0;
     pthread_mutex_unlock(&lock);
 }
 static int matches(Cell c,const uint8_t *pixels,int inverse) {
     int w=c.w,h=c.h,stride=c.font==0?6:h;
+    if(w<1 || w>8 || h<1 || h>512 || c.font<0 || c.font>3)return 0;
     int origin=c.x+(c.font<2);
     int ink=0,rows[512],left=w,right=-1,top=h,bottom=-1;
     for(int y=0;y<h;y++) {
@@ -274,13 +343,34 @@ static int matches(Cell c,const uint8_t *pixels,int inverse) {
     }
     return ink>0;
 }
+/* Home and Y= share bottom borders and TEXT_EDIT geometry. Identify the
+   visible toolbar before exporting either layout; cached pointers alone cannot
+   identify the active application. Prgm remains enabled in Home history
+   selection, where Algebra/Calc are deliberately shaded. */
+static int home_toolbar_word(const uint8_t *pixels,int x,const char *word) {
+    if(!font_offsets[0])return 0;
+    for(;*word;word++) {
+        Cell c=character(x,8,0,(unsigned char)*word,1);
+        if(!matches(c,pixels,0))return 0;
+        x+=c.w;
+    }
+    return 1;
+}
+static int editor_screen(const uint8_t *pixels) {
+    if(!hdtext_active || !tihw.on_off || !pixels)return 0;
+    for(int x=0;x<160;x++)if(!pixels[83*160+x] || !pixels[93*160+x])return 0;
+    if(!home_toolbar_word(pixels,1,"Tools"))return 0;
+    if(home_toolbar_word(pixels,88,"PrgmIO"))return 1;
+    if(home_toolbar_word(pixels,21,"Zoom"))return 2;
+    return 0;
+}
 int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
     int count=0;
     Port *p=port_for(tihw.lcd_adr,0);
     if(!p && tihw.lcd_adr==LCD_PORT)p=port_for(LCD_PORT,0);
     uint8_t clean[16000];int cursor_mask=0;
     if(hdtext_active && tihw.on_off && p && p->cursor_valid) {
-        int home=1;for(int x=0;x<160;x++)if(!pixels[83*160+x] || !pixels[93*160+x]){home=0;break;}
+        int home=editor_screen(pixels);
         if(home) {
             /* The medium ROM font has a blank final column. The cursor starts
                there, XORing it and the next character's first column. Read the
@@ -309,6 +399,57 @@ int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
         i++;
         if(c.attr==3)continue; /* Shaded glyphs intentionally stay original. */
         if(count<capacity){int32_t *v=out+count*PACKET_SIZE;v[0]=c.x+(c.font<2);v[1]=c.y;v[2]=c.font;v[3]=c.code;v[4]=inv;v[5]=c.w;v[6]=c.h;v[7]=c.attr;v[8]=c.left<0?0:c.left;v[9]=c.top<0?0:c.top;v[10]=c.right>160?160:c.right;v[11]=c.bottom>100?100:c.bottom;count++;}
+    }
+    int screen=p ? editor_screen(pixels):0;
+
+    if(screen) {
+        /* Copy the complete editor, not its scrolled display slice. Resolve its
+           movable heap handle afresh on every snapshot; never hold heap pointers. */
+        int editor_complete=0;
+        if(editor && heap_slot && editor+38<tihw.ram_size) {
+            int flags=word_at(editor+32),n=word_at(editor+16),cur=word_at(editor+18),sel=word_at(editor+22),allocated=word_at(editor+14);
+            uint32_t table=long_at(heap_slot),text=(flags&128)?long_at(editor+34):long_at(table+word_at(editor+34)*4);
+            if(n>=0 && n<=512 && n<=allocated && cur<=n && text && text+(unsigned)n<tihw.ram_size && !(flags&1) && count+n+1<=capacity) {
+                editor_complete=1;
+                uint32_t parent=long_at(editor);
+                int left=byte_at(parent+16)+(short)word_at(editor+6);
+                int right=byte_at(parent+16)+(short)word_at(editor+10)+1;
+                int32_t v[12]={cur,word_at(editor+20),8,flags,sel,n,screen-1,(int32_t)editor,left,84,right,93};memcpy(out+count++*12,v,sizeof v);
+                for(int i=0;i<n;i++){int32_t ch[12]={i,0,9,byte_at(text+i),0,6,8,1,0,0,160,100};memcpy(out+count++*12,ch,sizeof ch);}
+            }
+        }
+        /* An oversize live expression must keep the entire original body:
+           drawing only its smaller neighbours would hide visible content. */
+        int body_complete=editor_complete;
+        for(int k=0;k<16;k++)if(expressions[k].complete<0) {
+            Expression *e=&expressions[k];
+            for(int j=0;j<e->count;j++)if(!e->items[j].kind) {
+                Primitive q=e->items[j];Cell c={q.x-(q.font<2),q.y,q.font,q.code,q.attr,0,16,160,83,q.w,q.h,0};
+                if(matches(c,pixels,0) || matches(c,pixels,1)){body_complete=0;break;}
+            }
+        }
+        if(screen==2 && body_complete && count<capacity) {
+            int32_t v[12]={0,16,10,0,0,160,67,0,0,16,160,83};memcpy(out+count++*12,v,sizeof v);
+        }
+        if(screen==2 && body_complete && y_complete)for(int i=0;i<y_extra_count && count<capacity;i++) {
+            Cell c=y_extra[i];int32_t v[12]={c.x+(c.font<2),c.y,11,c.code,0,c.w,c.h,c.font,0,16,160,110};
+            memcpy(out+count++*12,v,sizeof v);
+        }
+        for(int k=0;k<16 && body_complete;k++) {
+            Expression *e=&expressions[k];if(e->complete!=1 || !e->count || count+e->count+1>capacity)continue;
+            int inv=0,matched=0;
+            for(int j=0;j<e->count;j++)if(e->items[j].kind==0) {
+                Primitive q=e->items[j];Cell c={q.x-(q.font<2),q.y,q.font,q.code,q.attr,0,16,160,83,q.w,q.h,0};
+                if(matches(c,pixels,0)){matched++;}else if(matches(c,pixels,1)){inv++;matched++;}
+            }
+            if(!matched && !(screen==2 && y_complete))continue; /* Completed Y= paint passes include deliberately clipped extra rows. */
+            inv=inv*2>matched;
+            int32_t header[12]={0,0,5,k,inv,e->count,0,0,0,16,160,83};memcpy(out+count++*12,header,sizeof header);
+            for(int j=0;j<e->count;j++) {
+                Primitive q=e->items[j];int32_t v[12]={q.x,q.y,q.kind?7:6,q.kind?q.x1:q.code,q.kind?q.y1:inv,q.kind?q.attr:q.w,q.h,q.font,k,16,160,83};
+                memcpy(out+count++*12,v,sizeof v);
+            }
+        }
     }
     return count;
 }

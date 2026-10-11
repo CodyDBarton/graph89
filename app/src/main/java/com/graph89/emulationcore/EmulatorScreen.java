@@ -214,6 +214,7 @@ public class EmulatorScreen
 				if (useSharpText() && !isScreenOff)
 				{
 					if (sharpText == null) sharpText = new SharpTextRenderer();
+					sharpText.compact = EmulatorActivity.ActiveInstance.Configuration.CompactLayout;
 					sharpText.update(ScreenData, Zoom, mRawScreenWidth, mRawScreenHeight, mParentSkinBase.LCDPixelON);
 				}
 				EmulatorActivity.UIStateManagerObj.EmulatorViewIntstance.postInvalidate();
@@ -253,6 +254,7 @@ public class EmulatorScreen
 			if (useSharpText() && flags[0] == 0)
 			{
 				SharpTextRenderer renderer = new SharpTextRenderer();
+				renderer.compact = EmulatorActivity.ActiveInstance.Configuration.CompactLayout;
 				renderer.update(data, EngineScreenParams.Zoom, EngineScreenParams.RawWidth, EngineScreenParams.RawHeight, mParentSkinBase.LCDPixelON);
 				renderer.draw(new Canvas(screenshotBitmap), new Rect(0, 0, screenshotBitmap.getWidth(), screenshotBitmap.getHeight()),
 					EngineScreenParams.RawWidth, EngineScreenParams.RawHeight, mParentSkinBase.LCDPixelON, mParentSkinBase.LCDPixelOFF);

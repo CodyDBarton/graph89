@@ -68,6 +68,7 @@ final class CalculatorController: UIViewController {
         hdDisplay.isUserInteractionEnabled = false
         lcdBezel.addSubview(hdDisplay)
         hdDisplay.enabled = settings.sharpText
+        hdDisplay.compact = settings.compactLayout
         lcd.isAccessibilityElement = true
         lcd.accessibilityLabel = "Calculator display"
         settingsButton.accessibilityLabel = "Configuration Settings"
@@ -211,6 +212,7 @@ final class CalculatorController: UIViewController {
             self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText)
             self.keyHaptics.configure(duration: self.settings.hapticDuration)
             self.hdDisplay.enabled = self.settings.sharpText
+            self.hdDisplay.compact = self.settings.compactLayout
             self.view.setNeedsLayout()
         }
         let navigation = UINavigationController(rootViewController: controller)
@@ -404,8 +406,8 @@ final class CalculatorEngine {
         queue.async {
             var bytes = [UInt8](repeating: 210, count: 160 * 100)
             graph89_copy_screen(&bytes)
-            var packets = [Int32](repeating: 0, count: 1024 * 12)
-            let count = graph89_copy_retained_text(&bytes, &packets, 1024)
+            var packets = [Int32](repeating: 0, count: 8192 * 12)
+            let count = graph89_copy_retained_text(&bytes, &packets, 8192)
             let frame = Frame(pixels: Data(bytes), retained: Array(packets.prefix(Int(count) * 12)), on: graph89_screen_is_on() != 0,
                               busy: graph89_is_busy() != 0, normalIterations: self.normalIterations,
                               turboIterations: self.turboIterations)
@@ -714,6 +716,9 @@ final class CalculatorSettings {
     var cpuPercent: Int {
         didSet { defaults.set(cpuPercent, forKey: "cpuPercent") }
     }
+    var compactLayout: Bool {
+        didSet { defaults.set(compactLayout, forKey: "compactLayout") }
+    }
     var sharpText: Bool {
         didSet { defaults.set(sharpText, forKey: "sharpText") }
     }
@@ -734,11 +739,13 @@ final class CalculatorSettings {
         }
         defaults.register(defaults: ["cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 8])
         sharpText = defaults.bool(forKey: "sharpText")
+        compactLayout = defaults.bool(forKey: "compactLayout") && sharpText
         cpuPercent = min(250, max(30, defaults.integer(forKey: "cpuPercent")))
         overclock = defaults.bool(forKey: "overclockWhenBusy")
         hapticDuration = min(30, max(0, defaults.integer(forKey: "hapticDuration")))
         stretchMode = StretchMode(rawValue: defaults.string(forKey: "stretchMode") ?? "") ?? .safeAspect
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-sharp-text") { sharpText = true }
+        if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-compact-layout") { sharpText = true;compactLayout = true }
     }
 }
 
@@ -749,6 +756,7 @@ final class ConfigurationController: UIViewController {
     private let valueLabel = UILabel()
     private let turboSwitch = UISwitch()
     private let sharpSwitch = UISwitch()
+    private let compactSwitch = UISwitch()
     private let stretchButton = UIButton(type: .system)
     private let stretchDetail = UILabel()
     private let hapticSlider = UISlider()
@@ -873,6 +881,21 @@ final class ConfigurationController: UIViewController {
         sharpDetail.textColor = .secondaryLabel
         sharpDetail.numberOfLines = 0
         stack.addArrangedSubview(sharpDetail)
+        let compactLabel = UILabel()
+        compactLabel.text = "Compact Layout (Prototype)"
+        compactLabel.font = .preferredFont(forTextStyle: .headline)
+        compactLabel.numberOfLines = 0
+        compactSwitch.accessibilityLabel = "Compact Layout (Prototype)"
+        compactSwitch.addTarget(self, action: #selector(compactChanged), for: .valueChanged)
+        let compactRow = UIStackView(arrangedSubviews: [compactLabel, compactSwitch])
+        compactRow.spacing = 12
+        stack.addArrangedSubview(compactRow)
+        let compactDetail = UILabel()
+        compactDetail.text = "Show more input and equations at once in Home and Y=. Uses Sharp Text. Turn off to restore the original spacing."
+        compactDetail.font = .preferredFont(forTextStyle: .subheadline)
+        compactDetail.textColor = .secondaryLabel
+        compactDetail.numberOfLines = 0
+        stack.addArrangedSubview(compactDetail)
         let reset = UIButton(type: .system)
         reset.setTitle("Restore Defaults", for: .normal)
         reset.addTarget(self, action: #selector(restoreDefaults), for: .touchUpInside)
@@ -885,6 +908,7 @@ final class ConfigurationController: UIViewController {
         valueLabel.text = "\(settings.cpuPercent)%"
         turboSwitch.isOn = settings.overclock
         sharpSwitch.isOn = settings.sharpText
+        compactSwitch.isOn = settings.compactLayout
         hapticSlider.value = Float(settings.hapticDuration)
         let hapticText = settings.hapticDuration == 0 ? "Disabled" : "\(settings.hapticDuration) ms"
         hapticValue.text = hapticText
@@ -917,9 +941,18 @@ final class ConfigurationController: UIViewController {
     }
     @objc private func sharpChanged() {
         settings.sharpText = sharpSwitch.isOn
+        if !settings.sharpText { settings.compactLayout = false }
+        updateControls()
+        onChange?()
+    }
+    @objc private func compactChanged() {
+        settings.compactLayout = compactSwitch.isOn
+        if settings.compactLayout { settings.sharpText = true }
+        updateControls()
         onChange?()
     }
     @objc private func restoreDefaults() {
+        settings.compactLayout = false
         settings.sharpText = false
         settings.cpuPercent = 100
         settings.overclock = true

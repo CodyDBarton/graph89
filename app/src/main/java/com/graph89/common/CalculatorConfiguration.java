@@ -40,6 +40,8 @@ public class CalculatorConfiguration
 
 	public static final String SharpTextKey = "CONF_SHARP_TEXT";
 	public boolean SharpText = false;
+	public static final String CompactLayoutKey = "CONF_COMPACT_LAYOUT";
+	public boolean CompactLayout = false;
 
 	public boolean				ZoomMode				= true;
 	public int					ScreenScale				= -1;

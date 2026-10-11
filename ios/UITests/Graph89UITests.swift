@@ -119,9 +119,12 @@ final class Graph89UITests: XCTestCase {
         let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD tall integral and parentheses inverted";selected.lifetime = .keepAlways;add(selected)
     }
 
-    func testSharpClippedMath() {
+    func testSharpClippedMath() { checkClippedMath(compact:false) }
+    func testCompactClippedMath() { checkClippedMath(compact:true) }
+    private func checkClippedMath(compact:Bool) {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-clipped-math"]
+        if compact { app.launchArguments.append("--ui-test-compact-layout") }
         app.launch()
         XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
         for key in ["HOME","CLEAR","F3","DOWN","ENTER"] { tap(app,key) }
@@ -137,8 +140,121 @@ final class Graph89UITests: XCTestCase {
         let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD clipped math inverted";selected.lifetime = .keepAlways;add(selected)
         let overlay=app.otherElements["Sharp text rendering"]
         XCTAssertGreaterThan(Int(overlay.identifier.dropFirst("retained:".count)) ?? 0,10)
+        if compact {
+            let fullShapes=NSPredicate { _,_ in (overlay.value as? String ?? "").contains("compact:1,math:3,inverse:3") }
+            expectation(for:fullShapes,evaluatedWith:overlay);waitForExpectations(timeout:5)
+        }
         let selectedClip=overlay.value as? String ?? ""
         XCTAssertTrue(selectedClip.contains("inverse:3"), "All three clipped symbols must retain inversion: \(selectedClip)")
+    }
+
+    func testCompactFullContentAndToggle() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        tap(app,"HOME");tap(app,"CLEAR")
+        for _ in 0..<20 { tap(app,"K1");tap(app,"PLUS") }
+        tap(app,"X")
+        let overlay=app.otherElements["Sharp text rendering"]
+        XCTAssertTrue((overlay.value as? String ?? "").contains("input:34,full:41"),"Full editor must expose the scrolled-off text: \(overlay.value ?? "")")
+        func capture(_ name:String) { let a=XCTAttachment(screenshot:app.screenshot());a.name=name;a.lifetime = .keepAlways;add(a) }
+        capture("Compact long input")
+        tap(app,"ENTER");Thread.sleep(forTimeInterval:1)
+        XCTAssertTrue((overlay.value as? String ?? "").contains("body:1"),"Full pretty print must be captured")
+        capture("Compact wide pretty print")
+        tap(app,"UP");tap(app,"UP");capture("Compact selected pretty print")
+        let before=pixels(app)
+        tap(app,"Configuration Settings")
+        let compact=app.switches["Compact Layout (Prototype)"]
+        for _ in 0..<5 { if compact.isHittable { break };app.swipeUp() }
+        XCTAssertEqual(compact.value as? String,"1");compact.tap();tap(app,"Done")
+        capture("Original spacing wide pretty print")
+        XCTAssertEqual(before,pixels(app),"Changing presentation must preserve the calculator framebuffer")
+        tap(app,"Configuration Settings")
+        for _ in 0..<5 { if compact.isHittable { break };app.swipeUp() }
+        XCTAssertEqual(compact.value as? String,"0");compact.tap();tap(app,"Done")
+        capture("Compact spacing restored")
+        XCTAssertTrue((overlay.value as? String ?? "").contains("compact:1"))
+    }
+
+    func testCompactYEditorAndEdgeScrolling() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        tap(app,"HOME");tap(app,"CLEAR");tap(app,"X");tap(app,"ENTER")
+        let overlay=app.otherElements["Sharp text rendering"]
+        XCTAssertTrue((overlay.value as? String ?? "").contains("body:1"))
+        tap(app,"DIAMOND");tap(app,"F1")
+        func checkY(_ name:String) {
+            let value=overlay.value as? String ?? ""
+            XCTAssertTrue(value.contains("body:1") && value.contains("yeditor:1"),"Y= must receive its own compact layout: \(value)")
+            let a=XCTAttachment(screenshot:app.screenshot());a.name=name;a.lifetime = .keepAlways;add(a)
+        }
+        checkY("Y editor with compact enabled")
+        tap(app,"CLEAR");tap(app,"X");tap(app,"PLUS");tap(app,"K2")
+        checkY("Y editor typing with compact enabled")
+        for _ in 0..<15 {tap(app,"PLUS");tap(app,"X")}
+        func number(_ key:String)->Double {
+            let value=overlay.value as? String ?? ""
+            return value.split(separator:",").first(where:{$0.hasPrefix(key+":")}).flatMap {Double($0.dropFirst(key.count+1))} ?? -1
+        }
+        let start=number("start"),caret=number("caret")
+        XCTAssertGreaterThan(start,0)
+        for _ in 0..<3 {tap(app,"LEFT")}
+        XCTAssertEqual(number("start"),start,"Left within viewport must not scroll")
+        XCTAssertEqual(number("caret"),caret-13.5,accuracy:0.01)
+        for _ in 0..<27 {tap(app,"LEFT")}
+        XCTAssertLessThan(number("start"),start,"Crossing left edge must scroll")
+        checkY("Compact Y editor after scrolling left")
+        tap(app,"ENTER");tap(app,"DOWN");checkY("Y editor next equation")
+        tap(app,"HOME")
+        XCTAssertTrue((overlay.value as? String ?? "").contains("body:1"),"Compact Home must resume")
+    }
+
+    func testCompactYEquationListAndToggle() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        tap(app,"HOME");tap(app,"DIAMOND");tap(app,"F1")
+        tap(app,"CLEAR");tap(app,"X");tap(app,"PLUS");tap(app,"K2");tap(app,"ENTER")
+        let overlay=app.otherElements["Sharp text rendering"]
+        XCTAssertTrue((overlay.value as? String ?? "").contains("yeditor:1"))
+        let a=XCTAttachment(screenshot:app.screenshot());a.name="Compact Y equation list";a.lifetime = .keepAlways;add(a)
+        let before=pixels(app)?.subdata(in:2560..<13280)
+        tap(app,"Configuration Settings")
+        let compact=app.switches["Compact Layout (Prototype)"]
+        for _ in 0..<5 {if compact.isHittable {break};app.swipeUp()}
+        compact.tap();tap(app,"Done")
+        XCTAssertEqual(before,pixels(app)?.subdata(in:2560..<13280),"Toggle must preserve the calculator equation list")
+        let b=XCTAttachment(screenshot:app.screenshot());b.name="Original Y equation list";b.lifetime = .keepAlways;add(b)
+    }
+
+    func testCompactYFillsAvailableHeight() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        tap(app,"HOME");tap(app,"DIAMOND");tap(app,"F1")
+        let overlay=app.otherElements["Sharp text rendering"]
+        func checkRows(_ name:String) {
+            let value=overlay.value as? String ?? ""
+            let rows=value.split(separator:",").first(where:{$0.hasPrefix("extra:")}).flatMap {Int($0.dropFirst(6))} ?? 0
+            XCTAssertGreaterThanOrEqual(rows,3,"Compact Y= must draw additional real rows: \(value)")
+            let a=XCTAttachment(screenshot:app.screenshot());a.name=name;a.lifetime = .keepAlways;add(a)
+        }
+        checkRows("Compact Y extra rows from top")
+        for _ in 0..<10 {tap(app,"DOWN")}
+        checkRows("Compact Y extra rows after scrolling")
+        let before=pixels(app)?.subdata(in:2560..<13280)
+        tap(app,"Configuration Settings")
+        let compact=app.switches["Compact Layout (Prototype)"]
+        for _ in 0..<5 {if compact.isHittable {break};app.swipeUp()}
+        compact.tap();tap(app,"Done")
+        XCTAssertEqual(before,pixels(app)?.subdata(in:2560..<13280),"Expanded capture must keep original Y= pixels")
+        let b=XCTAttachment(screenshot:app.screenshot());b.name="Original Y rows after scrolling";b.lifetime = .keepAlways;add(b)
     }
 
     func testSharpCursorBlink() {

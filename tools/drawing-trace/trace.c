@@ -16,6 +16,7 @@ extern void (*graph89_instruction_trace)(uint32_t);
 
 typedef struct { unsigned id; const char *name; uint32_t address; unsigned count; } Call;
 static Call calls[] = {
+ {0xA8,"TE_focus",0,0},{0xA9,"TE_handleEvent",0,0},{0xAC,"TE_open",0,0},{0xB1,"TE_select",0,0},{0xB3,"TE_unfocus",0,0},
  {0x009,"WinCharXY",0,0},{0x00a,"WinChar",0,0},{0x00c,"WinClr",0,0},
  {0x013,"WinFont",0,0},{0x023,"WinScrollH",0,0},{0x024,"WinScrollV",0,0},
  {0x025,"WinStr",0,0},{0x026,"WinStrXY",0,0},{0x04a,"Parse2DExpr",0,0},
@@ -72,6 +73,9 @@ static void observe(uint32_t pc) {
         fprintf(events,",\"registers\":[");
         for(unsigned r=0;r<16;r++) fprintf(events,"%s%u",r?",":"",regs.regs[r]);
         fprintf(events,"]");
+        if(c->id>=0xA8 && c->id<=0xB3) {
+            fprintf(events,",\"editor\":%u,\"editor_hex\":",long_at(a));hex_bytes(events,long_at(a),44);
+        }
         switch(c->id) {
           case 0x191: case 0x1a4: case 0x1a5:
             fprintf(events,",\"x\":%d,\"y\":%d,\"character\":%u,\"attr\":%d",(short)word_at(a),(short)word_at(a+2),word_at(a+4)&255,(short)word_at(a+(c->id==0x191?10:6)));
@@ -84,7 +88,7 @@ static void observe(uint32_t pc) {
           case 0x1a8:
             fprintf(events,",\"x\":%d,\"y\":%d,\"attr\":%d",(short)word_at(a),(short)word_at(a+2),(short)word_at(a+4));break;
           case 0x04c:
-            fprintf(events,",\"expression\":%u,\"window\":%u,\"x\":%d,\"y\":%d,\"expression_hex\":",long_at(a),long_at(a+4),(short)word_at(a+8),(short)word_at(a+10));hex_bytes(events,long_at(a),48);break;
+            fprintf(events,",\"expression\":%u,\"window\":%u,\"x\":%d,\"y\":%d,\"expression_hex\":",long_at(a),long_at(a+4),(short)word_at(a+8),(short)word_at(a+10));hex_bytes(events,long_at(a)-256,257);break;
           case 0x025: case 0x026: case 0x5db:
             fprintf(events,",\"window\":%u,\"window_hex\":",long_at(a));hex_bytes(events,long_at(a),40);
             if(c->id!=0x025) fprintf(events,",\"x\":%d,\"y\":%d",(short)word_at(a+4),(short)word_at(a+6));
@@ -103,20 +107,20 @@ static void sample_during_drawing(uint32_t pc) {
         uint32_t line=0;for(unsigned i=0;i<N_CALLS;i++)if(calls[i].id==0x1a7){line=calls[i].address;break;}
         uint32_t a=m68k_areg(regs,7)+4;
         if(pc==line && word_at(a+2)>=85 && word_at(a+2)<=92 && word_at(a+4)==word_at(a)+1 && word_at(a+8)==2) {
-            uint8_t screen[16000];int32_t packets[1024*12];graph89_copy_screen(screen);
+            uint8_t screen[16000];int32_t packets[8192*12];graph89_copy_screen(screen);
             for(int i=0;i<16000;i++)screen[i]=screen[i]==30;
-            int n=hdtext_copy_locked(screen,packets,1024),found=0;
+            int n=hdtext_copy_locked(screen,packets,8192),found=0;
             for(int i=0;i<n;i++)if(packets[i*12+1]==85 && packets[i*12+2]==1)found++;
             if(found!=4){fprintf(stderr,"Mid-cursor drawing lost an input character: %d\n",found);exit(1);}
             cursor_probes++;
         }
     }
     if(pc!=pixel || (strcmp(phase,"clipped-math-pretty") && strcmp(phase,"tall-integral-pretty")))return;
-    uint8_t pixels[16000];int32_t packets[1024*12];graph89_copy_screen(pixels);
+    uint8_t pixels[16000];int32_t packets[8192*12];graph89_copy_screen(pixels);
     for(int i=0;i<16000;i++)pixels[i]=pixels[i]==30;
     /* The observer runs inside the CPU batch lock. Sample each unfinished cap
        exactly as a host frame can, without recursively acquiring that lock. */
-    hdtext_copy_locked(pixels,packets,1024);mid_draw_probes++;
+    hdtext_copy_locked(pixels,packets,8192);mid_draw_probes++;
 }
 #endif
 static void run(unsigned n) { graph89_run(n); }
@@ -124,15 +128,15 @@ static void press(int key) { graph89_key(key,1);run(400000);graph89_key(key,0);r
 static void snapshot(const char *dir,const char *name) {
     char p[4096];snprintf(p,sizeof(p),"%s/%s.pgm",dir,name);
     uint8_t pixels[16000];graph89_copy_screen(pixels);
-    int32_t packets[1024*12];int count=graph89_copy_retained_text(pixels,packets,1024);
+    int32_t packets[8192*12];int count=graph89_copy_retained_text(pixels,packets,8192);
     char metadata[4096];snprintf(metadata,sizeof(metadata),"%s/%s.cells.json",dir,name);
     FILE *m=fopen(metadata,"wb");if(!m)exit(1);fputs("[",m);
     for(int i=0;i<count;i++){fprintf(m,"%s[",i?",":"");for(int j=0;j<12;j++)fprintf(m,"%s%d",j?",":"",packets[i*12+j]);fputs("]",m);}fputs("]\n",m);fclose(m);
     FILE *f=fopen(p,"wb");if(!f){perror(p);exit(1);}fprintf(f,"P5\n160 100\n255\n");fwrite(pixels,1,sizeof(pixels),f);fclose(f);
 }
 static void check_clipped_capture(void) {
-    uint8_t pixels[16000],test[16000];int32_t cells[1024*12],c[12];
-    graph89_copy_screen(pixels);int n=graph89_copy_retained_text(pixels,cells,1024),found=0;
+    uint8_t pixels[16000],test[16000];int32_t cells[8192*12],c[12];
+    graph89_copy_screen(pixels);int n=graph89_copy_retained_text(pixels,cells,8192),found=0;
     for(int i=0;i<n;i++)if(cells[i*12+2]==3 && cells[i*12+3]==189 && cells[i*12+1]<cells[i*12+9]) {
         memcpy(c,cells+i*12,sizeof c);found=1;break;
     }
@@ -140,16 +144,16 @@ static void check_clipped_capture(void) {
     memcpy(test,pixels,sizeof test);
     /* Pixels outside the guest clip must not affect this retained identity. */
     for(int y=0;y<c[9];y++)for(int x=c[0];x<c[0]+c[5];x++)test[y*160+x]=test[y*160+x]==30?210:30;
-    n=graph89_copy_retained_text(test,cells,1024);found=0;
+    n=graph89_copy_retained_text(test,cells,8192);found=0;
     for(int i=0;i<n;i++)if(cells[i*12+2]==3 && cells[i*12+3]==189 && cells[i*12+1]==c[1])found=1;
     if(!found){fprintf(stderr,"Hidden pixels invalidated clipped shape\n");exit(1);}
     memcpy(test,pixels,sizeof test);
     for(int y=c[9];y<c[11] && y<c[1]+c[6];y++)for(int x=c[0];x<c[0]+c[5];x++)test[y*160+x]=test[y*160+x]==30?210:30;
-    n=graph89_copy_retained_text(test,cells,1024);found=0;
+    n=graph89_copy_retained_text(test,cells,8192);found=0;
     for(int i=0;i<n;i++)if(cells[i*12+2]==3 && cells[i*12+3]==189 && cells[i*12+4]==(c[4]^1) && cells[i*12+6]==c[6])found=1;
     if(!found){fprintf(stderr,"Clipped shape inversion failed\n");exit(1);}
     for(int y=c[9];y<c[11] && y<c[1]+c[6];y++)for(int x=c[0];x<c[0]+c[5];x++)test[y*160+x]=210;
-    n=graph89_copy_retained_text(test,cells,1024);
+    n=graph89_copy_retained_text(test,cells,8192);
     for(int i=0;i<n;i++)if(cells[i*12+2]==3 && cells[i*12+3]==189 && cells[i*12+1]==c[1]) {
         fprintf(stderr,"Cleared clipped shape survived validation\n");exit(1);
     }
@@ -195,12 +199,12 @@ int main(int argc,char **argv) {
     phase="home";press(TIKEY_HOME);press(TIKEY_CLEAR);snapshot(argv[2],"01-home");
     phase="input";text("1/sin(x^2)");snapshot(argv[2],"02-input");
     if(retained) {
-        uint8_t pixels[16000];graph89_copy_screen(pixels);int32_t packets[1024*12];
-        int n=graph89_copy_retained_text(pixels,packets,1024),found=0;
+        uint8_t pixels[16000];graph89_copy_screen(pixels);int32_t packets[8192*12];
+        int n=graph89_copy_retained_text(pixels,packets,8192),found=0;
         for(int i=0;i<n;i++)if(packets[i*12+3]==49 && packets[i*12+1]==85) {
             int x=packets[i*12],y=packets[i*12+1],w=packets[i*12+5],h=packets[i*12+6];
             for(int row=0;row<h;row++)pixels[(y+row)*160+x+w-1]=30;
-            n=graph89_copy_retained_text(pixels,packets,1024);
+            n=graph89_copy_retained_text(pixels,packets,8192);
             for(int j=0;j<n;j++)if(packets[j*12]==x && packets[j*12+1]==y && packets[j*12+3]==49)found=1;
             break;
         }
@@ -237,6 +241,37 @@ int main(int argc,char **argv) {
 #ifdef GRAPH89_DRAW_TRACE
     probe_cursor=0;
 #endif
+    phase="compact-long-input";press(TIKEY_CLEAR);press(TIKEY_CLEAR);text("sin(x^2)+cos(x^2)+tan(x^2)+ln(x^2)+sqrt(x^2)");snapshot(argv[2],"20-compact-long-input");
+    phase="compact-left-within";for(int i=0;i<5;i++)press(TIKEY_LEFT);snapshot(argv[2],"20b-compact-left-within");
+    phase="compact-left-edge";for(int i=0;i<30;i++)press(TIKEY_LEFT);snapshot(argv[2],"20c-compact-left-edge");
+    for(int i=0;i<35;i++)press(TIKEY_RIGHT);
+    phase="compact-long-pretty";press(TIKEY_ENTER1);run(4000000);snapshot(argv[2],"21-compact-long-pretty");
+    phase="compact-long-selected";press(TIKEY_UP);press(TIKEY_UP);snapshot(argv[2],"22-compact-long-selected");
+    phase="compact-history-edit";press(TIKEY_DOWN);press(TIKEY_DOWN);press(TIKEY_CLEAR);press(TIKEY_CLEAR);text("1+x");snapshot(argv[2],"23-compact-history-edit");
+    phase="y-editor";press(TIKEY_DIAMOND);press(TIKEY_F1);snapshot(argv[2],"23b-y-editor");
+    phase="y-editor-input";press(TIKEY_CLEAR);text("sin(x^2)+cos(x^2)+tan(x^2)+ln(x^2)+sqrt(x^2)");snapshot(argv[2],"23c-y-editor-input");
+    phase="y-editor-left-within";for(int i=0;i<5;i++)press(TIKEY_LEFT);snapshot(argv[2],"23c1-y-editor-left-within");
+    phase="y-editor-left-edge";for(int i=0;i<25;i++)press(TIKEY_LEFT);snapshot(argv[2],"23c2-y-editor-left-edge");
+    for(int i=0;i<30;i++)press(TIKEY_RIGHT);
+    phase="y-editor-next";press(TIKEY_ENTER1);press(TIKEY_DOWN);snapshot(argv[2],"23d-y-editor-next");
+    phase="y-extra-equation-setup";for(int i=0;i<6;i++)press(TIKEY_DOWN);press(TIKEY_CLEAR);text("x^2+1");press(TIKEY_ENTER1);for(int i=0;i<9;i++)press(TIKEY_UP);
+    snapshot(argv[2],"23d0-y-extra-equation");
+    phase="y-extra-scrolled";for(int i=0;i<10;i++)press(TIKEY_DOWN);snapshot(argv[2],"23d00-y-extra-scrolled");
+    for(int i=0;i<10;i++)press(TIKEY_UP);press(TIKEY_DOWN);press(TIKEY_DOWN);
+    phase="compact-graph-prep";press(TIKEY_UP);press(TIKEY_UP);press(TIKEY_CLEAR);text("x");press(TIKEY_ENTER1);
+    phase="compact-graph";press(TIKEY_DIAMOND);press(TIKEY_F3);run(8000000);snapshot(argv[2],"23d1-graph");
+    phase="compact-window";press(TIKEY_DIAMOND);press(TIKEY_F2);snapshot(argv[2],"23d2-window");
+    phase="home-return";press(TIKEY_HOME);snapshot(argv[2],"23e-home-return");
+    phase="compact-overflow";press(TIKEY_CLEAR);press(TIKEY_CLEAR);
+    char wide[1024]={0};for(int i=0;i<80;i++)strcat(wide,"sin(x)+");strcat(wide,"x");
+    text(wide);
+    /* Large injected strings need all modifier/key events to finish before
+       ENTER; a fixed short budget can submit a partial expression. */
+    int drained=0;for(int i=0;i<10000;i++) {
+        run(100000);if(graph89_type_text("")){run(400000);drained=1;break;}
+    }
+    if(!drained){fprintf(stderr,"Oversize input queue did not drain\n");return 1;}
+    press(TIKEY_ENTER1);run(8000000);snapshot(argv[2],"24-compact-overflow");
     phase="apps-menu";press(TIKEY_APPS);snapshot(argv[2],"17-apps-menu");
 #ifdef GRAPH89_DRAW_TRACE
     graph89_instruction_trace=NULL;
@@ -248,19 +283,19 @@ int main(int argc,char **argv) {
         if(cursor_probes<16){fprintf(stderr,"Missing mid-cursor coverage\n");return 1;}
         printf("%u frame validations during XOR cursor redraw passed\n",cursor_probes);
 #endif
-        uint8_t pixels[16000];graph89_copy_screen(pixels);int32_t cells[1024*12];
-        int n=graph89_copy_retained_text(pixels,cells,1024);
+        uint8_t pixels[16000];graph89_copy_screen(pixels);int32_t cells[8192*12];
+        int n=graph89_copy_retained_text(pixels,cells,8192);
         if(n>0){
             int32_t first[12];memcpy(first,cells,sizeof first);int32_t *c=first;uint8_t inverse[16000];memcpy(inverse,pixels,sizeof pixels);
             for(int y=c[1];y<c[1]+c[6];y++)for(int x=c[0];x<c[0]+c[5];x++)inverse[y*160+x]=inverse[y*160+x]==30?210:30;
-            int m=graph89_copy_retained_text(inverse,cells,1024),found=0;
+            int m=graph89_copy_retained_text(inverse,cells,8192),found=0;
             for(int i=0;i<m;i++)if(cells[i*12]==c[0] && cells[i*12+1]==c[1] && cells[i*12+4]==(c[4]^1))found=1;
             if(!found){fprintf(stderr,"Inversion tracking failed\n");return 1;}
         }
         uint8_t blank[16000];memset(blank,210,sizeof blank);
-        if(graph89_copy_retained_text(blank,cells,1024)!=0){fprintf(stderr,"Clear invalidation failed\n");return 1;}
+        if(graph89_copy_retained_text(blank,cells,8192)!=0){fprintf(stderr,"Clear invalidation failed\n");return 1;}
         char state[4096];snprintf(state,sizeof(state),"%s/roundtrip.state",argv[2]);
-        if(graph89_save(state) || graph89_restore(state) || graph89_copy_retained_text(pixels,cells,1024)!=0){fprintf(stderr,"State restoration invalidation failed\n");return 1;}
+        if(graph89_save(state) || graph89_restore(state) || graph89_copy_retained_text(pixels,cells,8192)!=0){fprintf(stderr,"State restoration invalidation failed\n");return 1;}
     }
     fclose(events);
     snprintf(path,sizeof(path),"%s/timing.json",argv[2]);FILE *f=fopen(path,"wb");if(!f)return 1;

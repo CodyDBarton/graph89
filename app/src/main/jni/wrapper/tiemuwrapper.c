@@ -33,7 +33,7 @@
 #include "hdtext.h"
 
 static uint8_t retained_pixels[16000];
-static int32_t retained_packets[1024*12];
+static int32_t retained_packets[8192*12];
 static int retained_count;
 
 /* Called by the serialized screen reader, not the CPU thread. */
@@ -233,7 +233,7 @@ int tiemu_read_emulated_screen (uint8_t *return_flags)
     if(hdtext_active && tihw.on_off && !enable_grayscale && raw_width==160 && raw_height==100) {
         for(int y=0;y<100;y++)for(int x=0;x<160;x++)
             retained_pixels[y*160+x]=(tihw.lcd_ptr[y*LCDMEM_W/8+x/8] & (0x80>>(x&7)))!=0;
-        retained_count=hdtext_copy_locked(retained_pixels,retained_packets,1024);
+        retained_count=hdtext_copy_locked(retained_pixels,retained_packets,8192);
     }
     hdtext_run_end();
 	return CRC;

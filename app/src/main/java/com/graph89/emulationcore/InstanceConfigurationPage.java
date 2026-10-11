@@ -121,6 +121,12 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		else if (key.equals(CalculatorConfiguration.SharpTextKey))
 		{
 			mActiveInstance.Configuration.SharpText = sharedPreferences.getBoolean(CalculatorConfiguration.SharpTextKey, false);
+			if (!mActiveInstance.Configuration.SharpText) sharedPreferences.edit().putBoolean(CalculatorConfiguration.CompactLayoutKey, false).apply();
+		}
+		else if (key.equals(CalculatorConfiguration.CompactLayoutKey))
+		{
+			mActiveInstance.Configuration.CompactLayout = sharedPreferences.getBoolean(CalculatorConfiguration.CompactLayoutKey, false);
+			if (mActiveInstance.Configuration.CompactLayout) sharedPreferences.edit().putBoolean(CalculatorConfiguration.SharpTextKey, true).apply();
 		}
 		else if (key.equals(CalculatorConfiguration.EnableGrayScaleKey))
 		{
@@ -234,6 +240,7 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		editor.putBoolean(CalculatorConfiguration.SaveStateOnExitKey, mActiveInstance.Configuration.SaveStateOnExit);
 		editor.putBoolean(CalculatorConfiguration.EnableGrayScaleKey, mActiveInstance.Configuration.EnableGrayScale);
 		editor.putBoolean(CalculatorConfiguration.SharpTextKey, mActiveInstance.Configuration.SharpText);
+		editor.putBoolean(CalculatorConfiguration.CompactLayoutKey, mActiveInstance.Configuration.CompactLayout);
 
 		editor.putInt(CalculatorConfiguration.LCDColorKey, mActiveInstance.Configuration.LCDColor);
 		editor.putInt(CalculatorConfiguration.PixelOffKey, mActiveInstance.Configuration.PixelOff);
@@ -294,6 +301,7 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		if (mActiveInstance.CalculatorType != CalculatorTypes.TI89 && mActiveInstance.CalculatorType != CalculatorTypes.TI89T)
 		{
 			d.removePreference(findPreference(CalculatorConfiguration.SharpTextKey));
+			d.removePreference(findPreference(CalculatorConfiguration.CompactLayoutKey));
 		}
 
 		if (mActiveInstance.Configuration.UseLCDGrid)

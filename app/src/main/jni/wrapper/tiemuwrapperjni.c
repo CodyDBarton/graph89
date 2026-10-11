@@ -196,7 +196,7 @@ JNIEXPORT jintArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nati
     if(!pixels || (*env)->GetArrayLength(env,pixels)!=16000)return (*env)->NewIntArray(env,0);
     jboolean *p=(*env)->GetBooleanArrayElements(env,pixels,NULL);
     if(!p)return NULL;
-    int32_t packets[1024*12];
+    int32_t packets[8192*12];
     int count=tiemu_copy_retained_screen((const uint8_t *)p,packets);
     (*env)->ReleaseBooleanArrayElements(env,pixels,p,JNI_ABORT);
     jintArray result=(*env)->NewIntArray(env,count*12);

@@ -47,6 +47,12 @@
 
         <CheckBoxPreference
             android:defaultValue="false"
+            android:key="CONF_COMPACT_LAYOUT"
+            android:title="Compact Layout (Prototype)"
+            android:summary="Show more input and equations at once in Home and Y=. Enables Sharp Text. Turn off for original spacing." />
+
+        <CheckBoxPreference
+            android:defaultValue="false"
             android:key="CONF_ENABLE_GRAYSCALE"
             android:summary="Used in certain games/apps. Enabling it will decrease the engine&apos;s performance"
             android:title="Enable Grayscale" />

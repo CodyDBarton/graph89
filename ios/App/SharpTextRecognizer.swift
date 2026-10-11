@@ -28,6 +28,7 @@ final class SharpTextRecognizer {
         var cells: [Cell]=[]; var letters=0, ink=0, font=0
         var text: String { String(cells.compactMap { UnicodeScalar($0.glyph.character).map(Character.init) }) }
     }
+    private var romBytes: [UInt8] = []
     private var capturedGlyphs: [[Glyph?]] = Array(repeating: Array(repeating: nil, count: 256), count: 3)
     private var tables: [[UInt64:[Glyph]]] = Array(repeating: [:], count: 3)
     private var widths: [[Int]] = Array(repeating: [], count: 3)
@@ -36,6 +37,7 @@ final class SharpTextRecognizer {
     private let arrow = Glyph(0,3,2,SharpTextRecognizer.dropdown,[7,2],dynamic:true)
     init(_ bytes: [UInt8]) {
         precondition(bytes.count == 3*256*12)
+        romBytes = bytes
         for f in 0..<3 { for c in 0..<256 {
             let approved = (33..<127).contains(c) ? c : Self.special(c)
             if approved == 0 { continue }
@@ -49,6 +51,131 @@ final class SharpTextRecognizer {
             tables[f][key(w,rows),default:[]].append(g)
             if !widths[f].contains(w) { widths[f].append(w) }
         } }
+    }
+    // Full-content calls use the same approved outlines; unknown symbols keep
+    // their ROM bitmap. No new glyph design is introduced by compact layout.
+    func compactGlyph(_ f:Int,_ c:Int,_ w:Int = 0,_ h:Int = 0) -> Glyph? {
+        guard (0..<256).contains(c) else { return nil }
+        if (0..<3).contains(f) {
+            if let g=capturedGlyphs[f][c] { return g }
+            let off=(f*256+c)*12, width=Int(romBytes[off]), height=Int(romBytes[off+1])
+            guard (1...8).contains(width),(1...10).contains(height) else { return nil }
+            return Glyph(f,width,height,0,(0..<height).map { Int(romBytes[off+2+$0]) >> (8-width) })
+        }
+        guard f==3,(7...512).contains(h),[189,40,41].contains(c),w==(c==189 ? 5:3) else { return nil }
+        var rows=Array(repeating:c==189 ? 4:c==40 ? 4:1,count:h)
+        rows[0]=c==189 ? 2:c==40 ? 1:4; rows[h-1]=rows[0];rows[1]=2;rows[h-2]=2
+        if c==189 { rows[1]=5;rows[h-2]=20;rows[h-1]=8 }
+        return cached("native:\(c):\(h)",rows,w,c==189 ? Self.special(189):c)
+    }
+    struct CompactItem {
+        let x:Double,y:Double,scale:Double,inverse:Bool,glyph:Glyph?
+        var x1=0.0,y1=0.0,attribute=1
+        var clipTop=16.0
+    }
+    struct CompactScene {
+        var body=false,input=false,yEditor=false,items:[CompactItem]=[]
+        var eraseRects:[[Double]]=[]
+        var inverseRects:[[Double]]=[]
+        var cursorX:Double?=nil
+        var inputStart=0,inputCount=0,fullInputCount=0,extraRows=0
+    }
+    private var compactStart=0,compactEditor:Int32 = -1
+    func compactScene(_ packets:[Int32]) -> CompactScene {
+        var scene=CompactScene()
+        let records=stride(from:0,to:packets.count-packets.count%12,by:12)
+        scene.yEditor=records.contains { packets[$0+2]==10 }
+        scene.extraRows=records.filter { packets[$0+2]==11 && packets[$0]==7 && packets[$0+3]==121 }.count
+        scene.body=scene.yEditor
+        let base=scene.yEditor ? 16.0:83.0
+        for header in records where packets[header+2]==5 {
+            let group=packets[header+3]
+            let members=records.filter { (packets[$0+2]==6 || packets[$0+2]==7) && packets[$0+8]==group }
+            guard !members.isEmpty,members.count==Int(packets[header+5]) else { continue }
+            let left=members.map { Double(packets[$0]) }.min() ?? 0
+            let right=members.map { Double(packets[$0+2]==7 ? max(packets[$0],packets[$0+3])+1 : packets[$0]+packets[$0+5]) }.max() ?? 160
+            let anchor=scene.yEditor ? 0.0:(left>80 && right<=162 ? 159.0:8.0)
+            let scale=0.72,inverse=packets[header+4] != 0
+            scene.body=true
+            if inverse {
+                let top=members.map { Double($0+1<packets.count ? packets[$0+1]:0) }.min() ?? 16
+                let bottom=members.map { Double(packets[$0+2]==7 ? max(packets[$0+1],packets[$0+4])+1 : packets[$0+1]+packets[$0+6]) }.max() ?? 83
+                scene.inverseRects.append([anchor+(left-anchor)*scale-0.5,base+(top-base)*scale,(right-left)*scale+0.5,(bottom-top)*scale])
+            }
+            if scene.yEditor {
+                let top=members.map { Double(packets[$0+1]) }.min() ?? 16
+                let bottom=members.map { Double(packets[$0+2]==7 ? max(packets[$0+1],packets[$0+4])+1:packets[$0+1]+packets[$0+6]) }.max() ?? 83
+                scene.eraseRects.append([left,top,right-left,bottom-top,inverse ? 1:0])
+            }
+            for i in members {
+                // Delimiter calls include the raster stem. The approved full
+                // outline replaces that stem, so do not draw it a second time.
+                if packets[i+2]==7 && packets[i]==packets[i+3] && members.contains(where: { j in
+                    packets[j+2]==6 && packets[j+7]==3 && packets[i]>=packets[j] && packets[i]<packets[j]+packets[j+5] &&
+                    min(packets[i+1],packets[i+4])>=packets[j+1] && max(packets[i+1],packets[i+4])<packets[j+1]+packets[j+6]
+                }) { continue }
+                let x=anchor+(Double(packets[i])-anchor)*scale,y=base+(Double(packets[i+1])-base)*scale
+                if packets[i+2]==6 {
+                    guard let g=compactGlyph(Int(packets[i+7]),Int(packets[i+3]),Int(packets[i+5]),Int(packets[i+6])) else { continue }
+                    var item=CompactItem(x:x,y:y,scale:scale,inverse:inverse,glyph:g)
+                    if scene.yEditor {item.clipTop=21.04}
+                    scene.items.append(item)
+                } else {
+                    var item=CompactItem(x:x,y:y,scale:scale,inverse:inverse,glyph:nil,
+                        x1:anchor+(Double(packets[i+3])-anchor)*scale,y1:base+(Double(packets[i+4])-base)*scale,attribute:Int(packets[i+5]))
+                    if scene.yEditor {item.clipTop=21.04}
+                    scene.items.append(item)
+                }
+            }
+        }
+        if scene.yEditor {
+            for i in records where ((packets[i+2]>=0 && packets[i+2]<=3 && packets[i+1]<83) || (packets[i+2]==11 && packets[i+1]<110)) && packets[i+1]>=16 {
+                let x=Double(packets[i]),y=Double(packets[i+1])
+                if scene.eraseRects.contains(where:{x >= $0[0] && x < $0[0]+$0[2] && y >= $0[1] && y < $0[1]+$0[3]}) { continue }
+                guard let g=compactGlyph(Int(packets[i+2]==11 ? packets[i+7]:packets[i+2]),Int(packets[i+3]),Int(packets[i+5]),Int(packets[i+6])) else {continue}
+                var item=CompactItem(x:x*0.72,y:16+(y-16)*0.72,scale:0.72,inverse:packets[i+4] != 0,glyph:g)
+                item.clipTop=16+Double(max(16,packets[i+9])-16)*0.72
+                scene.items.append(item)
+            }
+            // Erase glyph ink only, keeping selection backgrounds and unknown
+            // graphics in the raster fallback that is compacted with the list.
+            for i in records where ((packets[i+2]>=0 && packets[i+2]<=3 && packets[i+1]<83) || (packets[i+2]==11 && packets[i+1]<110)) && packets[i+1]>=16 {
+                guard let g=compactGlyph(Int(packets[i+2]==11 ? packets[i+7]:packets[i+2]),Int(packets[i+3]),Int(packets[i+5]),Int(packets[i+6])),g.maxX>=g.minX else {continue}
+                scene.eraseRects.append([Double(packets[i])+Double(g.minX),Double(packets[i+1])+Double(g.minY),Double(g.maxX-g.minX+1),Double(g.maxY-g.minY+1),Double(packets[i+4])])
+            }
+        }
+        if let h=records.first(where:{packets[$0+2]==8}) {
+            let n=Int(packets[h+5]),cursor=Int(packets[h]),flags=Int(packets[h+3]),selection=Int(packets[h+4])
+            let chars=records.filter { packets[$0+2]==9 }
+            guard (0...512).contains(n),cursor>=0,cursor<=n,chars.count==n else { return scene }
+            // Reserve one slot for the caret; unlike the ROM's StartOffset,
+            // this viewport is based on 35 compact characters rather than 26.
+            let yInput=packets[h+6]==1
+            let left=yInput ? Double(packets[h+8])*0.75:1.0
+            let slots=max(1,Int((160-left-0.5-6*0.8)/4.5)+1)
+            let id=packets[h+7]
+            if compactEditor != id {compactEditor=id;compactStart=0}
+            compactStart=min(compactStart,max(0,n-(slots-1)))
+            if cursor<compactStart {compactStart=cursor}
+            if cursor>compactStart+slots-1 {compactStart=cursor-(slots-1)}
+            let start=compactStart,end=min(n,start+slots)
+            if yInput {
+                for i in records where packets[i+2]==1 && packets[i+1]==85 && packets[i]<packets[h+8] {
+                    if let g=compactGlyph(1,Int(packets[i+3])) {
+                        scene.items.append(CompactItem(x:0.5+Double(packets[i])*0.75,y:85.8,scale:0.8,inverse:packets[i+4] != 0,glyph:g))
+                    }
+                }
+            }
+            scene.input=true;scene.inputStart=start;scene.inputCount=end-start;scene.fullInputCount=n
+            for i in chars {
+                let index=Int(packets[i]);guard index>=start,index<end,let g=compactGlyph(1,Int(packets[i+3])) else { continue }
+                let inverse=flags&32 != 0 && flags&512 != 0 && index>=min(selection,cursor) && index<max(selection,cursor)
+                scene.items.append(CompactItem(x:left+0.5+Double(index-start)*4.5,y:85.8,scale:0.8,inverse:inverse,glyph:g))
+            }
+            scene.cursorX=left+Double(cursor-start)*4.5
+        }
+        if !scene.input {compactEditor = -1;compactStart=0}
+        return scene
     }
     static func cursor(_ packets:[Int32]) -> (x:Int,mask:Int)? {
         for i in stride(from:0,to:packets.count-packets.count%12,by:12) {

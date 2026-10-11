@@ -16,6 +16,8 @@ import java.util.List;
 
 /** Exact ROM recognition with the approved smooth font; unmatched pixels stay original. */
 final class SharpTextRenderer {
+    boolean compact;
+    private int[] retained;
     private SharpTextRecognizer recognizer;
     private List<SharpTextRecognizer.Cell> fallback = Collections.emptyList();
     private List<SharpTextRecognizer.Cell> cells = Collections.emptyList();
@@ -70,6 +72,7 @@ final class SharpTextRenderer {
             for (int x = 0; x < width; ++x)
                 pixels[y * width + x] = screen[(y * zoom + zoom / 2) * width * zoom + x * zoom + zoom / 2] == onColor;
         int[] packets=EmulatorActivity.nativeTiEmuGetRetainedText(pixels);
+        retained=packets;
         cursor=SharpTextRecognizer.cursor(packets);
         pixels=SharpTextRecognizer.withoutCursor(pixels,packets);
         fallback = recognizer.recognizeStable(pixels, width, height, fallback);
@@ -129,6 +132,57 @@ final class SharpTextRenderer {
         return path;
     }
 
+    private void drawCompact(Canvas canvas,Rect destination,float sx,float sy,SharpTextRecognizer.CompactScene scene,int on,int off) {
+        int saved=canvas.save();canvas.translate(destination.left,destination.top);canvas.scale(sx,sy);
+        background.setColor(off);
+        if(scene.body)canvas.drawRect(0,16,160,83,background);
+        if(scene.input)canvas.drawRect(0,84,160,93,background);
+        if(scene.yEditor) {
+            boolean[] remaining=pixels.clone();
+            for(double[] r:scene.eraseRects) {
+                int x0=Math.max(0,(int)r[0]),x1=Math.min(160,(int)Math.ceil(r[0]+r[2]));
+                int y0=Math.max(16,(int)r[1]),y1=Math.min(83,(int)Math.ceil(r[1]+r[3]));
+                for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++)remaining[y*160+x]=r[4]!=0;
+            }
+            Path raster=new Path();
+            for(int y=16;y<83;y++)for(int x=0;x<160;) {
+                if(!remaining[y*160+x]){x++;continue;}
+                int left=x;while(x<160 && remaining[y*160+x])x++;
+                raster.addRect(left*0.72f,16+(y-16)*0.72f,x*0.72f,16+(y-15)*0.72f,Path.Direction.CW);
+            }
+            background.setColor(on);canvas.drawPath(raster,background);
+        }else if(scene.body) {
+            background.setColor(on);
+            for(int y=16;y<83;y++)for(int x=0;x<6;x++)if(pixels[y*160+x])canvas.drawRect(x,83+(y-83)*0.72f,x+1,83+(y-82)*0.72f,background);
+        }
+        int bodyClip=canvas.save();canvas.clipRect(0,scene.yEditor?21.04f:16,160,83);background.setColor(on);
+        for(double[] r:scene.inverseRects)canvas.drawRect((float)r[0],(float)r[1],(float)(r[0]+r[2]),(float)(r[1]+r[3]),background);
+        canvas.restoreToCount(bodyClip);
+        for(SharpTextRecognizer.CompactItem item:scene.items)if(item.inverse && item.glyph!=null && item.scale==0.8) {
+            int clip=canvas.save();canvas.clipRect(0,item.scale==0.8?84:(float)item.clipTop,160,item.scale==0.8?93:83);
+            background.setColor(on);
+            canvas.drawRect((float)item.x-0.5f,(float)item.y,(float)(item.x+(item.scale==0.8?4.5:(item.glyph.width+1)*item.scale)-0.5),(float)(item.y+item.glyph.height*item.scale),background);
+            canvas.restoreToCount(clip);
+        }
+        for(SharpTextRecognizer.CompactItem item:scene.items) {
+            int clip=canvas.save();canvas.clipRect(0,item.scale==0.8?84:(float)item.clipTop,160,item.scale==0.8?93:83);
+            ink.setColor(item.inverse?off:on);
+            if(item.glyph!=null) {
+                SharpTextRecognizer.Glyph g=item.glyph;canvas.translate((float)item.x,(float)item.y);canvas.scale((float)item.scale,(float)item.scale);
+                if(g.character!=0)canvas.drawPath(outline(g),ink);
+                else for(int y=0;y<g.height;y++)for(int x=0;x<g.width;x++)if((g.rows[y]&(1<<(g.width-x-1)))!=0)canvas.drawRect(x,y,x+1,y+1,ink);
+            }else if(item.attribute!=0) {
+                ink.setStrokeWidth((float)item.scale);ink.setStrokeCap(Paint.Cap.SQUARE);
+                canvas.drawLine((float)(item.x+item.scale/2),(float)(item.y+item.scale/2),(float)(item.x1+item.scale/2),(float)(item.y1+item.scale/2),ink);
+            }
+            canvas.restoreToCount(clip);
+        }
+        if(scene.cursorX!=null && cursor!=null) {
+            ink.setColor(on);
+            for(int y=0;y<8;y++)if((cursor[1]&(1<<y))!=0)canvas.drawRect(scene.cursorX.floatValue(),85.8f+y*0.8f,scene.cursorX.floatValue()+0.6f,85.8f+(y+1)*0.8f,ink);
+        }
+        canvas.restoreToCount(saved);
+    }
     void draw(Canvas canvas, Rect destination, int width, int height, int onColor, int offColor) {
         if (!available || pixels == null) return;
         float sx = destination.width() / (float)width, sy = destination.height() / (float)height;
@@ -165,7 +219,9 @@ final class SharpTextRenderer {
             canvas.drawPath(outline(g), ink);
             canvas.restoreToCount(saved);canvas.restoreToCount(savedClip);
         }
-        if(cursor!=null) {
+        SharpTextRecognizer.CompactScene scene=compact && recognizer!=null?recognizer.compactScene(retained):null;
+        if(scene!=null)drawCompact(canvas,destination,sx,sy,scene,onColor,offColor);
+        if(cursor!=null && (scene==null || !scene.input)) {
             ink.setColor(onColor);
             for(int y=0;y<8;y++)if((cursor[1]&(1<<y))!=0)
                 canvas.drawRect(destination.left+(cursor[0]+0.7f)*sx,destination.top+(85+y)*sy,

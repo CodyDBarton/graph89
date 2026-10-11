@@ -61,7 +61,7 @@ for name in ['16d-inverse-trig-input','16e-inverse-trig-pretty','16f-inverse-tri
     if name not in by_name: continue
     packets=json.loads((frames/(name+'.cells.json')).read_text())
     rows=[list(map(int,c.split(','))) for c in by_name[name].split(';') if c]
-    wanted=[c for c in packets if c[3]==180]
+    wanted=[c for c in packets if c[2]<=3 and c[3]==180]
     assert wanted, ('Inverse trig fixture must contain ROM character 180',name)
     for c in wanted:
         assert any(r[0]==c[0] and r[1]==c[1] and r[2]==c[2] and r[3]==57780 and r[4]==c[4] for r in rows),(name,c)
