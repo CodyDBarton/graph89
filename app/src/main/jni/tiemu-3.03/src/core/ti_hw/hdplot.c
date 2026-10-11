@@ -4,9 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <time.h>
 #include "ti68k_def.h"
 #include "libuae.h"
 #include "hdplot.h"
+#include "kbd.h"
 #define MAX_POINTS 32768
 #define MAX_DECORATIONS 16384
 int hdplot_active;
@@ -19,6 +21,34 @@ static float points[MAX_POINTS*2],bounds[4];
 /* Axis drawing is observed only inside GrAxes and only on the actual LCD
    port. Window routines also draw to a backing port: never capture both. */
 static uint32_t axes_call,line_call,pix_call,port_slot,axes_return,axes_sp;
+static uint32_t bitmap_call,char_call,char_return,char_sp,graph_font_slot;
+typedef struct {int x,y,valid;uint8_t pixels[48];} PromptGlyph;
+static PromptGlyph prompt_glyphs[27];static int prompt_index,prompt_pending;
+static uint32_t prompt_return,prompt_sp;
+static int cursor_size=11;
+static const unsigned cursor11[]={0x0400,0x0400,0x0e00,0x1500,0x2480,0xffe0,0x2480,0x1500,0x0e00,0x0400,0x0400};
+static const unsigned cursor21[]={0x002000,0x002000,0x002000,0x00f800,0x032600,0x042100,0x082080,0x082080,0x102040,0x102040,0xfffff8,0x102040,0x102040,0x082080,0x082080,0x042100,0x032600,0x00f800,0x002000,0x002000,0x002000};
+static int cursor_x,cursor_y,cursor_known,label_x,label_y,label_pending;
+typedef struct {int x,y,code,valid,visible;uint8_t pixels[48];} PlotLabel;
+static PlotLabel labels[4];static int label_index;
+static int navigation_cursor,navigation_label;
+static uint8_t trace_toolbar[480];static int trace_toolbar_valid,trace_mode,trace_requested;
+static int trace_repeating;
+static int previous_x,previous_y,previous_size;
+int graph89_trace_repeat_factor=3;
+static uint32_t hold_counter,hold_decrement[4];static int hold_sites;
+static int graph_cursor_context,held_arrow=-1,hold_started_repeat;
+static double held_since;
+#ifdef GRAPH89_DRAW_TRACE
+/* Isolated regressions can advance real-time input independently of CPU work. */
+double graph89_cursor_test_time=-1;
+#endif
+static double cursor_time(void){
+#ifdef GRAPH89_DRAW_TRACE
+ if(graph89_cursor_test_time>=0)return graph89_cursor_test_time;
+#endif
+ struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec/1e9;
+}
 static int decoration_count,decoration_bad,axes_capturing;
 static float decorations[MAX_DECORATIONS*4];
 static uint8_t decoration_mask[16000],before_axes[16000];
@@ -90,23 +120,70 @@ static void initialize(void) {
  /* The first post-evaluation y conversion reads the live GR_WIN_VARS global. */
  if(word_at(first_site+8)!=0x2eb9)return;window_slot=long_at(first_site+10);
  if(window_slot+4>tihw.ram_size||word_at(evaluator)!=0x4e56||word_at(evaluator+2)!=0xfff8)return;
+ /* Derive the live first-repeat countdown from the verified OSInitKeyDelay
+    load/store, then verify its interrupt decrement sites. No fixed RAM address. */
+ uint32_t delay=rom_call(0x248),initial=0;
+ if(word_at(delay)==0x7200 && word_at(delay+2)==0x322f && word_at(delay+4)==4 && word_at(delay+6)==0x3039 && word_at(delay+12)==0x33c1 && long_at(delay+8)==long_at(delay+14) && word_at(delay+18)==0x4e75)initial=long_at(delay+8);
+ if(initial && initial+2<tihw.ram_size){
+  for(uint32_t q=tihw.rom_base;q+10<tihw.rom_base+tihw.rom_size;q+=2)
+   if(word_at(q)==0x33f9 && long_at(q+2)==initial){uint32_t counter=long_at(q+6);if(counter+2<tihw.ram_size){hold_counter=counter;break;}}
+  for(uint32_t q=tihw.rom_base;hold_counter && q+6<tihw.rom_base+tihw.rom_size;q+=2)
+   if(word_at(q)==0x5379 && long_at(q+2)==hold_counter){if(hold_sites<4){hold_decrement[hold_sites++]=q;watch(q);}else{hold_counter=0;break;}}
+ }
  supported=1;watch(evaluator);watch(win_clear);watch(first_site);watch(next_site);
  uint32_t port_restore=rom_call(0x1a3);
  if(word_at(port_restore)==0x23fc && long_at(port_restore+2)==0x4c00){
   port_slot=long_at(port_restore+6);
-  if(port_slot+4<tihw.ram_size){axes_call=rom_call(0x1b7);line_call=rom_call(0x1a7);pix_call=rom_call(0x1a8);watch(axes_call);watch(line_call);watch(pix_call);}
+  if(port_slot+4<tihw.ram_size){axes_call=rom_call(0x1b7);line_call=rom_call(0x1a7);pix_call=rom_call(0x1a8);watch(axes_call);watch(line_call);watch(pix_call);uint32_t getter=rom_call(0x18e);if(word_at(getter)==0x1039 && word_at(getter+6)==0x4e75)graph_font_slot=long_at(getter+2);bitmap_call=rom_call(0x187);char_call=rom_call(0x1a4);watch(bitmap_call);watch(char_call);}
  }
 }
 void hdplot_observe(uint32_t pc) {
  uint32_t sp=m68k_areg(regs,7),a=sp+4;
+ if(hold_counter && graph_cursor_context && held_arrow>=0 && !hold_started_repeat && tihw.on_off && trace_toolbar_valid && !memcmp(trace_toolbar,tihw.ram+tihw.lcd_adr,480)){
+  for(int k=0;k<hold_sites;k++)if(pc==hold_decrement[k]){
+   int delay=cursor_time()-held_since<0.5?2:1;
+   tihw.ram[hold_counter]=0;tihw.ram[hold_counter+1]=delay;
+   if(delay==1)hold_started_repeat=1;
+  }
+ }
  if(eval_active && pc==eval_return && sp==eval_sp+4) {
   if(enabled && building)append(number_at(xptr),number_at(yptr),(m68k_dreg(regs,0)&65535)==1);
   if(extra_index>0){extra_index=enabled?extra_index-1:0;memcpy(regs.regs,entry_regs,sizeof entry_regs);regs.flags=entry_flags;
    if(!extra_index || !put_number(xptr,current_x-step_x*extra_index/divisions)){extra_index=0;memcpy(tihw.ram+xptr,original_x,10);}
    m68k_setpc(evaluator);fill_prefetch_slow();return;}
-  have_last=1;last_x=current_x;eval_active=0;hdplot_active=enabled;
+  have_last=1;last_x=current_x;eval_active=0;hdplot_active=1;
+ }
+ /* Graph Math prompts are medium-font DrawChar cells above the readouts.
+    Retain full cells rather than just pixels that differ from the graph. */
+ if(prompt_pending && pc==prompt_return && sp==prompt_sp+4){
+  PromptGlyph *g=&prompt_glyphs[prompt_index];uint8_t lcd[16000];screen(lcd);
+  for(int y=0;y<8;y++)for(int x=0;x<6;x++)g->pixels[y*6+x]=lcd[(g->y+y)*160+g->x+x];
+  g->valid=1;prompt_pending=0;
+ }
+ if(pc==char_call && long_at(port_slot)==tihw.lcd_adr && graph_font_slot && byte_at(graph_font_slot)==1){
+  int x=(short)word_at(a)+1,y=(short)word_at(a+2),code=word_at(a+4);
+  if(code>32 && code<127 && x>=0 && x+6<=159 && y>=74 && y+8<=85){
+   prompt_index=0;while(prompt_index<26 && prompt_glyphs[prompt_index].valid && (prompt_glyphs[prompt_index].x!=x || prompt_glyphs[prompt_index].y!=y))prompt_index++;
+   prompt_glyphs[prompt_index].x=x;prompt_glyphs[prompt_index].y=y;prompt_glyphs[prompt_index].valid=0;
+   prompt_pending=1;prompt_return=long_at(sp);prompt_sp=sp;watch(prompt_return);
+  }
+ }
+ if(label_pending && pc==char_return && sp==char_sp+4){
+  uint8_t lcd[16000];screen(lcd);for(int y=0;y<8;y++)for(int x=0;x<6;x++)labels[label_index].pixels[y*6+x]=lcd[(label_y+y)*160+label_x+x];labels[label_index].valid=1;memcpy(trace_toolbar,tihw.ram+tihw.lcd_adr,480);trace_toolbar_valid=1;if(trace_requested)trace_mode=1;label_pending=0;
+ }
+ if(pc==char_call && long_at(port_slot)==tihw.lcd_adr){
+  int x=(short)word_at(a)+1,y=(short)word_at(a+2),code=word_at(a+4);
+  if(graph_font_slot && byte_at(graph_font_slot)==1 && x>=140 && x+6<=159 && y>=16 && y+8<=29 && code>=48 && code<=57){label_index=0;while(label_index<3 && labels[label_index].valid && (labels[label_index].x!=x || labels[label_index].y!=y))label_index++;labels[label_index].x=x;labels[label_index].y=y;labels[label_index].code=code;labels[label_index].valid=0;label_x=x;label_y=y;label_pending=1;char_return=long_at(sp);char_sp=sp;watch(char_return);}
+ }
+ if(pc==bitmap_call && long_at(port_slot)==tihw.lcd_adr && (word_at(a+12)==1 || word_at(a+12)==2)){
+  uint32_t b=long_at(a+4);int size=word_at(b),stride=size==21?3:2;
+  const unsigned *rows=size==21?cursor21:cursor11;
+  int matches=(size==11 || size==21) && word_at(b+2)==size;
+  for(int y=0;y<size&&matches;y++){unsigned row=0;for(int x=0;x<stride;x++)row=(row<<8)|byte_at(b+4+y*stride+x);matches=row==rows[y];}
+  if(matches){graph_cursor_context=1;memcpy(trace_toolbar,tihw.ram+tihw.lcd_adr,480);trace_toolbar_valid=1;if(cursor_known){previous_x=cursor_x;previous_y=cursor_y;previous_size=cursor_size;}if(size==21 && trace_mode)trace_repeating=1;cursor_x=(short)word_at(a);cursor_y=(short)word_at(a+2);cursor_size=size;cursor_known=1;}
  }
  if(!enabled)return;
+
  if(pc==finish_site && sp==finish_sp && building){screen(reference);building=0;complete=!overflow&&!eval_active;eval_active=0;finish_site=0;}
  if(axes_capturing && pc==axes_return && sp==axes_sp+4){
   axes_capturing=0;axes_return=0;
@@ -127,6 +204,7 @@ void hdplot_observe(uint32_t pc) {
    axis_dx=(number_at(range+10)-axis_xmin)/158;axis_dy=(axis_ymax-number_at(range+30))/76;
    x_scale=number_at(range+20);y_scale=number_at(range+50);
    axis_x=-axis_xmin/axis_dx;axis_y=16+axis_ymax/axis_dy;
+   xmin=axis_xmin;xmax=number_at(range+10);ymin=number_at(range+30);ymax=axis_ymax;
    if(isfinite(axis_x)&&isfinite(axis_y)&&axis_dx>0&&axis_dy>0){axes_capturing=1;axes_return=long_at(sp);axes_sp=sp;watch(axes_return);}
   }
  }
@@ -191,7 +269,24 @@ void hdplot_observe(uint32_t pc) {
  memcpy(original_x,tihw.ram+xptr,10);memcpy(entry_regs,regs.regs,sizeof entry_regs);entry_flags=regs.flags;eval_active=1;
  if(extra_index && !put_number(xptr,current_x-step_x*extra_index/divisions))extra_index=0;
 }
-void hdplot_run_begin(void){pthread_mutex_lock(&lock);if(enabled)initialize();}
+/* Both graph cursors use the same budget, only after a real-time half-second
+   hold. Native keyboard processing still owns each movement and key release. */
+void hdplot_cursor_speed(int multiplier){pthread_mutex_lock(&lock);graph89_trace_repeat_factor=multiplier<1?1:multiplier>10?10:multiplier;pthread_mutex_unlock(&lock);}
+void hdplot_key_event(int key,int pressed){
+ int arrow=key==TIKEY_LEFT || key==TIKEY_RIGHT || key==TIKEY_UP || key==TIKEY_DOWN;
+ if(!arrow && pressed){graph_cursor_context=0;trace_mode=0;trace_requested=key==TIKEY_F3 && !ti68k_kbd_is_key_pressed(TIKEY_DIAMOND) && !ti68k_kbd_is_key_pressed(TIKEY_2ND) && !ti68k_kbd_is_key_pressed(TIKEY_SHIFT);}
+ if(arrow && pressed && held_arrow!=key){held_arrow=key;held_since=cursor_time();hold_started_repeat=0;}
+ if((arrow && !pressed && held_arrow==key) || (!arrow && pressed)){held_arrow=-1;hold_started_repeat=0;}
+ if(!arrow || !pressed)trace_repeating=0;
+}
+int hdplot_trace_multiplier(void){
+ if(!graph_cursor_context || held_arrow<0 || cursor_time()-held_since<0.5 || !tihw.on_off || !trace_toolbar_valid || memcmp(trace_toolbar,tihw.ram+tihw.lcd_adr,480))return 1;
+ if(!ti68k_kbd_is_key_pressed(held_arrow))return 1;
+ uint32_t gv=long_at(window_slot),win=gv+0x246<tihw.ram_size?long_at(gv+0x242):0;
+ if(gv+0x31a>=tihw.ram_size || byte_at(gv+0x319)!=1 || win+28>=tihw.ram_size || byte_at(win+16)!=0 || byte_at(win+17)!=16 || byte_at(win+18)!=158 || byte_at(win+19)!=92)return 1;
+ return graph89_trace_repeat_factor;
+}
+void hdplot_run_begin(void){pthread_mutex_lock(&lock);initialize();}
 void hdplot_run_end(void){
  /* Live frames validate only the unchanged toolbar in base. The exact LCD
     reference is captured at plot completion (or the empty-graph axes return),
@@ -204,26 +299,110 @@ void hdplot_enable(int on,int samples){pthread_mutex_lock(&lock);
  /* Complete a pending synthetic call before changing its factor or disabling. */
  if(!eval_active)factor=samples;
  if(enabled!=(on!=0)){enabled=on!=0;if(!(enabled&&loaded_cache)){complete=0;if(!eval_active){count=0;building=0;have_last=0;}}loaded_cache=0;}
- hdplot_active=enabled||eval_active;pthread_mutex_unlock(&lock);}
-void hdplot_reset(void){pthread_mutex_lock(&lock);ready=supported=count=building=complete=overflow=have_last=eval_active=loaded_cache=0;finish_site=0;axes_capturing=decoration_count=decoration_bad=0;axes_return=port_slot=axes_call=line_call=pix_call=0;memset(decoration_mask,0,sizeof decoration_mask);memset(hdplot_pages,0,sizeof hdplot_pages);hdplot_active=enabled;pthread_mutex_unlock(&lock);}
-int hdplot_copy(const uint8_t *pixels,float *out,int capacity,uint8_t *background){pthread_mutex_lock(&lock);int n=0;
+ hdplot_active=1;pthread_mutex_unlock(&lock);}
+void hdplot_reset(void){pthread_mutex_lock(&lock);ready=supported=count=building=complete=overflow=have_last=eval_active=loaded_cache=0;cursor_known=label_pending=navigation_cursor=navigation_label=0;memset(labels,0,sizeof labels);memset(prompt_glyphs,0,sizeof prompt_glyphs);prompt_pending=0;trace_toolbar_valid=trace_mode=trace_requested=trace_repeating=previous_size=0;graph_cursor_context=hold_sites=hold_counter=hold_started_repeat=0;held_arrow=-1;finish_site=0;axes_capturing=decoration_count=decoration_bad=0;axes_return=port_slot=axes_call=line_call=pix_call=0;memset(decoration_mask,0,sizeof decoration_mask);memset(hdplot_pages,0,sizeof hdplot_pages);hdplot_active=1;pthread_mutex_unlock(&lock);}
+/* Keep calculator-owned cursors, coordinate readouts and popup menus above
+   the cached vector scene. Bit 1 in the background marks native overlay pixels;
+   renderers exclude these patches so the current LCD/text underneath remains
+   visible. The mathematical window and several complete graph toolbar tiles
+   must still identify the same graph; a saved curve never covers Home or Y=. */
+static int same_window(void){
+ uint32_t gv=long_at(window_slot),win=gv+0x246<tihw.ram_size?long_at(gv+0x242):0;
+ uint32_t range=gv+164<tihw.ram_size?long_at(gv+160):0;
+ return gv+0x31a<tihw.ram_size && byte_at(gv+0x319)==1 && win+28<tihw.ram_size && range+60<tihw.ram_size
+  && byte_at(win+16)==0 && byte_at(win+17)==16 && byte_at(win+18)==158 && byte_at(win+19)==92
+  && number_at(range)==xmin && number_at(range+10)==xmax && number_at(range+30)==ymin && number_at(range+40)==ymax;
+}
+static void overlay_patch(const uint8_t *pixels,uint8_t *background,int l,int t,int r,int b){
+ int left=r,top=b,right=l,bottom=t;
+ for(int y=t;y<b;y++)for(int x=l;x<r;x++)if(pixels[y*160+x]!=reference[y*160+x]){
+  if(x<left)left=x;if(x>=right)right=x+1;if(y<top)top=y;if(y>=bottom)bottom=y+1;
+ }
+ /* Include unchanged pixels inside the patch: popup whitespace must conceal
+    the curve too, and a cursor must not leave the old raster curve beneath it. */
+ for(int y=top;y<bottom;y++)for(int x=left;x<right;x++)background[y*160+x]|=2;
+}
+static int navigation_background(const uint8_t *pixels,uint8_t *background){
+ navigation_cursor=navigation_label=0;
+ if(!same_window())return 0;
+ static const int edges[]={0,20,41,62,93,112,132,146};int tiles=0;
+ for(int tile=0;tile<7;tile++){
+  int same=1;for(int y=0;y<16 && same;y++)for(int x=edges[tile];x<edges[tile+1];x++)
+   if(pixels[y*160+x]!=reference[y*160+x]){same=0;break;}
+  tiles+=same;
+ }
+ if(tiles<4)return 0;
+ memcpy(background,base,16000);
+ /* Coordinate fields and Trace's function number are separate overlays. They
+    must not enlarge the cursor/popup patch across the otherwise unchanged plot. */
+ overlay_patch(pixels,background,0,83,80,93);
+ overlay_patch(pixels,background,80,83,159,93);
+ overlay_patch(pixels,background,140,16,159,29);
+ int left=159,top=83,right=0,bottom=16;
+ for(int y=16;y<83;y++)for(int x=0;x<159;x++){
+  if(x>=140 && y<29)continue;
+  if(pixels[y*160+x]==reference[y*160+x])continue;
+  if(x<left)left=x;if(x>=right)right=x+1;if(y<top)top=y;if(y>=bottom)bottom=y+1;
+ }
+ if(tiles==7 && (right-left>13 || bottom-top>13)) {
+  /* Drawing annotations are retained as their changed native pixels instead
+     of replacing a large rectangular part of the HD graph. Popup menus have
+     a selected toolbar tile and need their complete opaque rectangle. */
+  for(int y=16;y<83;y++)for(int x=0;x<159;x++)if(pixels[y*160+x]!=reference[y*160+x])background[y*160+x]|=2;
+ }else {
+  int mask=right-left<=13 && bottom-top<=13?6:2; /* bit 2 protects a small native cursor from text matching */
+  for(int y=top;y<bottom;y++)for(int x=left;x<right;x++)background[y*160+x]|=mask;
+ }
+ /* Validate both blink phases against the known bitmap, rather than
+    inferring its centre from ink that can cancel against a curve. */
+ if(cursor_known && cursor_x+cursor_size>0 && cursor_x<159 && cursor_y+cursor_size>16 && cursor_y<83){
+  const unsigned *rows=cursor_size==21?cursor21:cursor11;int stride=cursor_size==21?24:16,same=1,blank=1;
+  for(int y=0;y<cursor_size;y++)for(int x=0;x<cursor_size;x++){int px=cursor_x+x,py=cursor_y+y;if(px<0||px>=159||py<16||py>=83)continue;int i=py*160+px,ink=(rows[y]&(1u<<(stride-1-x)))!=0;
+   if(pixels[i]!=(cursor_size==21?(reference[i]^ink):(ink?1:reference[i])))same=0;
+   if(pixels[i]!=(cursor_size==21?reference[i]:(ink?0:reference[i])))blank=0;
+  }
+  int transition=0;
+  if(!same && !blank && graph_cursor_context && (ti68k_kbd_is_key_pressed(TIKEY_LEFT)||ti68k_kbd_is_key_pressed(TIKEY_RIGHT)||ti68k_kbd_is_key_pressed(TIKEY_UP)||ti68k_kbd_is_key_pressed(TIKEY_DOWN))){
+   transition=1;for(int y=16;y<83 && transition;y++)for(int x=0;x<159;x++){
+    if(x>=140 && y<29)continue;if(pixels[y*160+x]==reference[y*160+x])continue;
+    if(!(x>=cursor_x && x<cursor_x+cursor_size && y>=cursor_y && y<cursor_y+cursor_size) && !(previous_size && x>=previous_x && x<previous_x+previous_size && y>=previous_y && y<previous_y+previous_size)){transition=0;break;}
+   }
+  }
+  if(transition){same=1;for(int y=0;y<previous_size;y++)for(int x=0;x<previous_size;x++){int px=previous_x+x,py=previous_y+y;if(px>=0&&px<159&&py>=16&&py<83)background[py*160+px]=(background[py*160+px]&1)|4;}}
+  if(same||blank){navigation_cursor=(cursor_size==21?2:0)+(same?1:2);for(int y=0;y<cursor_size;y++)for(int x=0;x<cursor_size;x++){int px=cursor_x+x,py=cursor_y+y;if(px>=0&&px<159&&py>=16&&py<83)background[py*160+px]=(background[py*160+px]&1)|4;}}
+ }
+ for(int k=0;k<4;k++){PlotLabel *label=&labels[k];label->visible=0;if(!label->valid)continue;
+  int same=1;for(int y=0;y<8;y++)for(int x=0;x<6;x++)if(pixels[(label->y+y)*160+label->x+x]!=label->pixels[y*6+x])same=0;
+  if(same){navigation_label=1;label->visible=1;for(int y=0;y<8;y++)for(int x=0;x<6;x++)background[(label->y+y)*160+label->x+x]|=2;}
+ }
+ int prompt_left=159,prompt_right=0,prompt_top=85,prompt_bottom=0;
+ for(int k=0;k<27;k++){PromptGlyph *g=&prompt_glyphs[k];if(!g->valid)continue;
+  int same=1;for(int y=0;y<8 && same;y++)for(int x=0;x<6;x++)if(pixels[(g->y+y)*160+g->x+x]!=g->pixels[y*6+x]){same=0;break;}
+  if(same){if(g->x<prompt_left)prompt_left=g->x;if(g->x+6>prompt_right)prompt_right=g->x+6;if(g->y<prompt_top)prompt_top=g->y;if(g->y+8>prompt_bottom)prompt_bottom=g->y+8;}
+ }
+ for(int y=prompt_top;y<prompt_bottom;y++)for(int x=prompt_left;x<prompt_right;x++){int i=y*160+x;background[i]=(background[i]&1)|2;}
+ return 1;
+}
+int hdplot_copy(const uint8_t *pixels,float *out,int capacity,uint8_t *background){pthread_mutex_lock(&lock);int n=0;navigation_cursor=navigation_label=0;
  int live=building&&!overflow&&(tihw.ram[tihw.lcd_adr+99*30+19]&1);
  int exported=count<3?3:count;
  if(enabled&&(complete||live)&&tihw.on_off&&count>0&&capacity>=exported*2+4){int valid=1;
-  /* Live graph pixels change between Android's screen read and this call.
-     The unchanged graph toolbar plus active plotting scope/BUSY identify
-     live frames. Completed graphs still require an exact LCD match so menus,
-     trace views and other screens cannot be covered by stale curves. */
-  int rows=live?16:93;
-  for(int y=0;y<rows &&valid;y++)for(int x=0;x<160;x++)if(pixels[y*160+x]!=(live?base[y*160+x]:reference[y*160+x])){valid=0;break;}
+  /* Active plotting still validates its stable toolbar. Completed scenes
+     accept calculator-owned interaction overlays in the same graph window. */
+  if(live){for(int y=0;y<16 &&valid;y++)for(int x=0;x<160;x++)if(pixels[y*160+x]!=base[y*160+x]){valid=0;break;}
+   if(valid)memcpy(background,base,16000);
+  }else valid=navigation_background(pixels,background);
   if(valid){memcpy(out,bounds,sizeof bounds);memcpy(out+4,points,count*2*sizeof(float));
    for(int i=count*2;i<exported*2;i++)out[i+4]=NAN;
-   memcpy(background,base,16000);n=exported*2+4;}}
+   n=exported*2+4;}}
  pthread_mutex_unlock(&lock);return n;}
 
 int hdplot_copy_decorations(float *out,int capacity){pthread_mutex_lock(&lock);
  int n=enabled&&(complete||(building&&!overflow&&(tihw.ram[tihw.lcd_adr+99*30+19]&1)))&&!decoration_bad&&capacity>=decoration_count*4?decoration_count*4:0;
- if(n)memcpy(out,decorations,n*sizeof(float));pthread_mutex_unlock(&lock);return n;}
+ if(n)memcpy(out,decorations,n*sizeof(float));
+ if(navigation_cursor && capacity>=n+4){out[n++]=NAN;out[n++]=-navigation_cursor;out[n++]=cursor_x+cursor_size/2.0f;out[n++]=cursor_y+cursor_size/2.0f;}
+ if(navigation_label)for(int k=0;k<4;k++)if(labels[k].visible && capacity>=n+4){out[n++]=NAN;out[n++]=labels[k].code;out[n++]=labels[k].x;out[n++]=labels[k].y;}
+ pthread_mutex_unlock(&lock);return n;}
 
 /* A saved state may land inside an additional ROM evaluation. Retain only
    the continuation needed to finish that call and restore its original sample.

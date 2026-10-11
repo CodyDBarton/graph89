@@ -17,6 +17,7 @@ void graph89_retained_text_enable(int enabled);
 int graph89_copy_retained_text(const uint8_t *screen, int32_t *packets, int capacity);
 int graph89_copy_hd_plot_decorations(float *segments,int capacity);
 void graph89_hd_plot_enable(int enabled,int samples);
+void graph89_graph_cursor_speed(int multiplier);
 int graph89_copy_hd_plot(const uint8_t *screen,float *points,int capacity,uint8_t *background);
 int graph89_copy_font_templates(uint8_t *templates);
 int graph89_save(const char *path);

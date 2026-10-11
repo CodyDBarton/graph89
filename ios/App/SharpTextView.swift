@@ -19,6 +19,7 @@ final class SharpTextView: UIView {
     private var cells: [SharpTextRecognizer.Cell]=[]
     private var font: CTFont?
     private var family = CGRect.null
+    private let plotNumbers=(48...57).map { SharpTextRecognizer.Glyph(1,6,8,$0,Array(repeating:0,count:8)) }
     private var paths: [ObjectIdentifier: CGPath]=[:]
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -48,18 +49,29 @@ final class SharpTextView: UIView {
         plot=next;plotBackground=background;plotDecorations=decorations;setNeedsDisplay()
         if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
             accessibilityIdentifier="Sharp text rendering"
-            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4)"
+            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"
         }
     }
+    private var vectorCursorCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && plotDecorations[$0+1] <= -1}.count}
+    private var plotNumberCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && plotDecorations[$0+1]>=48}.count}
     private func drawPlot(_ context:CGContext) {
         guard plot.count>6,plotBackground.count==16000 else {return}
         context.saveGState()
         context.clip(to:CGRect(x:CGFloat(plot[0]),y:CGFloat(plot[1]),width:CGFloat(plot[2]-plot[0]),height:CGFloat(plot[3]-plot[1])))
+        // Preserve native interaction overlays already drawn with sharp text.
+        let visible=CGMutablePath()
+        visible.addRect(CGRect(x:CGFloat(plot[0]),y:CGFloat(plot[1]),width:CGFloat(plot[2]-plot[0]),height:CGFloat(plot[3]-plot[1])))
+        for y in 16..<93 {var x=0;while x<159 {
+            if plotBackground[y*160+x]&2==0 {x += 1;continue}
+            let left=x;while x<159 && plotBackground[y*160+x]&2 != 0 {x += 1}
+            visible.addRect(CGRect(x:left,y:y,width:x-left,height:1))
+        }}
+        context.addPath(visible);context.clip(using:.evenOdd)
         context.setFillColor(UIColor(white:210/255.0,alpha:1).cgColor);context.fill(CGRect(x:0,y:16,width:159,height:77))
         let axes=CGMutablePath()
         for y in 16..<93 {var x=0;while x<159 {
-            if plotBackground[y*160+x]==0 {x += 1;continue}
-            let left=x;while x<159 && plotBackground[y*160+x] != 0 {x += 1}
+            if plotBackground[y*160+x]&1==0 {x += 1;continue}
+            let left=x;while x<159 && plotBackground[y*160+x]&1 != 0 {x += 1}
             axes.addRect(CGRect(x:left,y:y,width:x-left,height:1))
         }}
         context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor);context.addPath(axes);context.fillPath()
@@ -67,6 +79,7 @@ final class SharpTextView: UIView {
         context.setLineWidth(240/(bounds.width*contentScaleFactor));context.setLineCap(.round)
         let geometry=CGMutablePath()
         for i in stride(from:0,to:plotDecorations.count,by:4) {
+            if plotDecorations[i].isNaN {continue}
             let p=CGPoint(x:CGFloat(plotDecorations[i]),y:CGFloat(plotDecorations[i+1]))
             let q=CGPoint(x:CGFloat(plotDecorations[i+2]),y:CGFloat(plotDecorations[i+3]))
             if p==q {let radius=120/(bounds.width*contentScaleFactor);context.fillEllipse(in:CGRect(x:p.x-radius,y:p.y-radius,width:2*radius,height:2*radius))}
@@ -97,9 +110,41 @@ final class SharpTextView: UIView {
         context.setStrokeColor(UIColor(white:30/255.0,alpha:1).cgColor)
         context.setLineWidth(240/(bounds.width*contentScaleFactor));context.setLineJoin(.round);context.setLineCap(.round)
         context.addPath(path);context.strokePath();context.restoreGState()
+        context.saveGState()
+        context.clip(to:CGRect(x:CGFloat(plot[0]),y:CGFloat(plot[1]),width:CGFloat(plot[2]-plot[0]),height:CGFloat(plot[3]-plot[1])))
+        var vectorCursor=false
+        for i in stride(from:0,to:plotDecorations.count,by:4) where plotDecorations[i].isNaN {
+            let kind=Int(plotDecorations[i+1]),x=CGFloat(plotDecorations[i+2]),y=CGFloat(plotDecorations[i+3])
+            if kind == -2 || kind == -4 {vectorCursor=true}
+            else if kind == -1 || kind == -3 {
+                vectorCursor=true
+                context.saveGState();context.clip(to:CGRect(x:0,y:16,width:159,height:67))
+                let radius:CGFloat=kind == -3 ? 7.5:3,extent:CGFloat=kind == -3 ? 10:5
+                let cursor=CGMutablePath();cursor.addEllipse(in:CGRect(x:x-radius,y:y-radius,width:2*radius,height:2*radius))
+                cursor.move(to:CGPoint(x:x-extent,y:y));cursor.addLine(to:CGPoint(x:x+extent,y:y))
+                cursor.move(to:CGPoint(x:x,y:y-extent));cursor.addLine(to:CGPoint(x:x,y:y+extent))
+                context.setLineCap(.butt)
+                context.setStrokeColor(UIColor(white:210/255.0,alpha:1).cgColor);context.setLineWidth(2);context.addPath(cursor);context.strokePath()
+                context.setStrokeColor(UIColor(white:30/255.0,alpha:1).cgColor);context.setLineWidth(0.8);context.addPath(cursor);context.strokePath();context.restoreGState()
+            } else if (48...57).contains(kind) {
+                let glyph=plotNumbers[kind-48]
+                if let path=outline(glyph) {
+                    context.saveGState();context.translateBy(x:x,y:y);context.clip(to:CGRect(x:0,y:0,width:6,height:8))
+                    context.setFillColor(UIColor(white:210/255.0,alpha:1).cgColor);context.fill(CGRect(x:0,y:0,width:6,height:8))
+                    context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor);context.addPath(path);context.fillPath();context.restoreGState()
+                }
+            }
+        }
+        if !vectorCursor {
+            for y in 16..<83 { for x in 0..<159 where plotBackground[y*160+x]&4 != 0 {
+                context.setFillColor(UIColor(white:(pixels[y*160+x] ? 30:210)/255.0,alpha:1).cgColor)
+                context.fill(CGRect(x:x,y:y,width:1,height:1))
+            } }
+        }
+        context.restoreGState()
     }
     private func recognize() {
-        if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {accessibilityIdentifier="Sharp text rendering";accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4)";if !enabled {cells=[];fallback=[];return}}
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {accessibilityIdentifier="Sharp text rendering";accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)";if !enabled {cells=[];fallback=[];return}}
         guard enabled, font != nil, pixels.count==160*100, let recognizer else { cells=[]; fallback=[]; accessibilityHint="retained:0"; accessibilityValue = "off:0"; return }
         fallback=recognizer.stable(pixels,fallback)
         cells=recognizer.retained(retained,fallback:fallback)
@@ -128,6 +173,13 @@ final class SharpTextView: UIView {
                     accessibilityValue="on:\(cells.count);compact:1,math:\(rendered.count),inverse:\(rendered.filter { $0.inverse }.count)"
                 } else { accessibilityValue="on:\(cells.count);clipped:\(clipped.count),math:\(clipped.filter { $0.glyph.dynamic }.count),inverse:\(clipped.filter { $0.glyph.dynamic && $0.inverse }.count)" }
             }
+        }
+        // Text recognition runs after updatePlot and may refresh these values.
+        // Keep the graph test's snapshot count authoritative when both layers
+        // are enabled, instead of briefly replacing it with the text counter.
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
+            accessibilityIdentifier="Sharp text rendering"
+            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"
         }
     }
     private func glyphPath(_ code:Int,_ face:CTFont)->CGPath? {
@@ -248,6 +300,13 @@ final class SharpTextView: UIView {
         }
         context.restoreGState()
     }
+    private func nativeCursor(_ cell:SharpTextRecognizer.Cell)->Bool {
+        guard plot.count>6,plotBackground.count==16000,cell.y<83,cell.y+cell.glyph.height>16 else { return false }
+        for y in max(16,cell.y)..<min(83,cell.y+cell.glyph.height) {
+            for x in max(0,cell.x)..<min(159,cell.x+cell.glyph.width) where plotBackground[y*160+x]&4 != 0 { return true }
+        }
+        return false
+    }
     override func draw(_ rect:CGRect) {
         guard enabled || !plot.isEmpty, let context=UIGraphicsGetCurrentContext(), pixels.count==160*100 else { return }
         // Clear in native pixel coordinates before scaling. Erasing separately
@@ -257,6 +316,7 @@ final class SharpTextView: UIView {
         if scene?.body == true { for y in 16..<83 { for x in 0..<160 { cleaned[y*160+x]=210 } } }
         if scene?.input == true { for y in 84..<93 { for x in 0..<160 { cleaned[y*160+x]=210 } } }
         for cell in cells {
+            if nativeCursor(cell) { continue }
             if scene?.body == true && cell.y<83 && cell.y+cell.glyph.height>16 { continue }
             if scene?.input == true && cell.y==85 { continue }
             let g=cell.glyph
@@ -273,6 +333,7 @@ final class SharpTextView: UIView {
         context.translateBy(x:0,y:100);context.scaleBy(x:1,y:-1)
         context.draw(image,in:CGRect(x:0,y:0,width:160,height:100));context.restoreGState()
         for cell in cells {
+            if nativeCursor(cell) { continue }
             if scene?.body == true && cell.y<83 && cell.y+cell.glyph.height>16 { continue }
             if scene?.input == true && cell.y==85 { continue }
             let g=cell.glyph; guard g.character != 0, let path=outline(g) else { continue }

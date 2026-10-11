@@ -136,7 +136,11 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		{
 			mActiveInstance.Configuration.EnableGrayScale = sharedPreferences.getBoolean(CalculatorConfiguration.EnableGrayScaleKey, false);
 		}
-		else if (key.equals(CalculatorConfiguration.CPUSpeedKey))
+		else if (key.equals(CalculatorConfiguration.GraphCursorSpeedKey))
+        {
+            mActiveInstance.Configuration.GraphCursorSpeed = sharedPreferences.getInt(CalculatorConfiguration.GraphCursorSpeedKey, 3);
+        }
+        else if (key.equals(CalculatorConfiguration.CPUSpeedKey))
 		{
 			mActiveInstance.Configuration.CPUSpeed = sharedPreferences.getInt(CalculatorConfiguration.CPUSpeedKey, 100);
 		}
@@ -240,7 +244,8 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		{
 			editor.putString(CalculatorConfiguration.SkinKeyV200, SkinDefinition.SkinTypeToString(mActiveInstance.Configuration.Skin, mActiveInstance.CalculatorType));
 		}
-		editor.putInt(CalculatorConfiguration.CPUSpeedKey, mActiveInstance.Configuration.CPUSpeed);
+		editor.putInt(CalculatorConfiguration.GraphCursorSpeedKey, mActiveInstance.Configuration.GraphCursorSpeed > 0 ? mActiveInstance.Configuration.GraphCursorSpeed : 3);
+        editor.putInt(CalculatorConfiguration.CPUSpeedKey, mActiveInstance.Configuration.CPUSpeed);
 		editor.putBoolean(CalculatorConfiguration.OverclockWhenBusyKey, mActiveInstance.Configuration.OverclockWhenBusy);
 		editor.putBoolean(CalculatorConfiguration.EnergySaveKey, mActiveInstance.Configuration.EnergySave);
 		editor.putBoolean(CalculatorConfiguration.SaveStateOnExitKey, mActiveInstance.Configuration.SaveStateOnExit);
@@ -277,6 +282,7 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		mScreenScale.mDefaultValue = DefaultScreenZoom;
 
 		mCPUSpeed.ValuePost = "%";
+        ((SeekBarPreference)findPreference(CalculatorConfiguration.GraphCursorSpeedKey)).ValuePost = "x";
 	}
 
 	private void Configure()

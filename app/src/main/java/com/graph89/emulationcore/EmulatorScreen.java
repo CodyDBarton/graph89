@@ -349,7 +349,7 @@ public class EmulatorScreen
 				// the skin rectangle. Keep overlay and bitmap coordinates identical.
 				Rect actual = mIntegerZoom ? new Rect(DestinationRectangle.left, DestinationRectangle.top,
 					DestinationRectangle.left + mZoomedScreenWidth, DestinationRectangle.top + mZoomedScreenHeight) : DestinationRectangle;
-				sharpText.draw(canvas, actual, mRawScreenWidth, mRawScreenHeight, mParentSkinBase.LCDPixelON, mParentSkinBase.LCDPixelOFF);
+				sharpText.draw(canvas, actual, mRawScreenWidth, mRawScreenHeight, mParentSkinBase.LCDPixelON, mParentSkinBase.LCDPixelOFF,useHDPlot() && hdPlot!=null?hdPlot.overlayMask():null);
 			}
             if(hdPlot!=null && useHDPlot() && !isScreenOff){
                 Rect actual=mIntegerZoom?new Rect(DestinationRectangle.left,DestinationRectangle.top,DestinationRectangle.left+mZoomedScreenWidth,DestinationRectangle.top+mZoomedScreenHeight):DestinationRectangle;

@@ -205,6 +205,7 @@ JNIEXPORT jintArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nati
     return result;
 }
 
+JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuGraphCursorSpeed(JNIEnv *env,jobject obj,jint multiplier){hdplot_cursor_speed(multiplier);}
 JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuHDPlotEnable(JNIEnv *env,jobject obj,jboolean enabled){hdplot_enable(enabled,8);}
 JNIEXPORT jfloatArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuGetHDPlot(JNIEnv *env,jobject obj,jbooleanArray pixels,jbyteArray background){
  if(!pixels||!background||(*env)->GetArrayLength(env,pixels)!=16000||(*env)->GetArrayLength(env,background)!=16000)return (*env)->NewFloatArray(env,0);

@@ -308,9 +308,12 @@ final class Graph89UITests: XCTestCase {
         let b=XCTAttachment(screenshot:app.screenshot());b.name="Original Y equation list";b.lifetime = .keepAlways;add(b)
     }
 
-    func testHDPlotEvaluatesAdditionalPointsAndToggle() {
+    func testHDPlotEvaluatesAdditionalPointsAndToggle() { exerciseHDPlotNavigation(sharp:true) }
+    func testHDPlotSharpNavigationWithOriginalText() { exerciseHDPlotNavigation(sharp:false) }
+    private func exerciseHDPlotNavigation(sharp:Bool) {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot"]
+        if sharp {app.launchArguments.append("--ui-test-sharp-text")}
         app.launch()
         XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:20))
         tap(app,"DIAMOND");tap(app,"F3")
@@ -320,8 +323,24 @@ final class Graph89UITests: XCTestCase {
         XCTAssertTrue((overlay.value as? String ?? "").contains(";axes:44"),"Axes and ticks must use the vector geometry layer")
         let a=XCTAttachment(screenshot:app.screenshot());a.name="HD sin(x squared)";a.lifetime = .keepAlways;add(a)
         let before=pixels(app)
+        for key in ["RIGHT","UP","F3","RIGHT","LEFT","UP","DOWN","ESC","F2","ESC","F5","ESC"] {
+            tap(app,key)
+            XCTAssertGreaterThan(count(),1200,"HD plot must survive \(key) navigation")
+            if key=="F3" {
+                XCTAssertTrue((overlay.value as? String ?? "").contains(";cursorVector:1;plotNumbers:1;"),"Trace cursor and plot number must use vector artwork: \(overlay.value as? String ?? "missing")")
+                let protected=Int((overlay.value as? String ?? "").components(separatedBy:"cursorProtected:").last ?? "0") ?? 0
+                XCTAssertGreaterThan(protected,0,"Trace cursor must be protected from Sharp Text replacement")
+                if let raw=pixels(app) {
+                    var pgm=Data("P5\n160 100\n255\n".utf8);pgm.append(raw)
+                    let native=XCTAttachment(data:pgm,uniformTypeIdentifier:"public.data");native.name="Native Trace LCD.pgm";native.lifetime = .keepAlways;add(native)
+                }
+            }
+            if key=="F3" || key=="F2" || key=="F5" {
+                let shot=XCTAttachment(screenshot:app.screenshot());shot.name="HD navigation \(key)";shot.lifetime = .keepAlways;add(shot)
+            }
+        }
         tap(app,"F1")
-        XCTAssertEqual(count(),0,"Calculator menus must retain their original display")
+        XCTAssertGreaterThan(count(),1200,"HD curves must remain behind the native popup menu")
         tap(app,"ESC")
         XCTAssertGreaterThan(count(),1200,"Closing a menu must restore the HD graph")
         tap(app,"Configuration Settings")
@@ -334,6 +353,29 @@ final class Graph89UITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_ ,_ in count()==0},object:overlay)],timeout:10),.completed,"Toggle must restore original graph")
         XCTAssertEqual(before?.subdata(in:2560..<14880),pixels(app)?.subdata(in:2560..<14880),"HD plotting must preserve original graph pixels")
         let b=XCTAttachment(screenshot:app.screenshot());b.name="Original sin(x squared)";b.lifetime = .keepAlways;add(b)
+    }
+
+    func testHDTraceHeldArrow() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-sharp-text"]
+        app.launch();tap(app,"DIAMOND");tap(app,"F3")
+        let overlay=app.otherElements["Sharp text rendering"]
+        func active()->Bool {(Int((overlay.value as? String ?? "").components(separatedBy:";")[0].replacingOccurrences(of:"plot:",with:"")) ?? 0)>1200}
+        XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_ ,_ in active() && (app.staticTexts["Engine status"].value as? String ?? "").hasSuffix(",0")},object:overlay)],timeout:45),.completed)
+        tap(app,"F3")
+        let before=pixels(app)
+        app.buttons["RIGHT"].coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).press(forDuration:1.5)
+        XCTAssertTrue(active(),"Holding Trace RIGHT must retain HD curves")
+        XCTAssertNotEqual(before?.subdata(in:13280..<14880),pixels(app)?.subdata(in:13280..<14880),"Held Trace must update its coordinate readouts")
+        XCTAssertTrue((overlay.value as? String ?? "").contains(";cursorVector:1;"),"Released Trace cursor must remain vector based")
+        let screenshot=XCTAttachment(screenshot:app.screenshot());screenshot.name="Trace after held RIGHT";screenshot.lifetime = .keepAlways;add(screenshot)
+        tap(app,"ESC")
+        app.buttons["LEFT"].coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).press(forDuration:1.5)
+        XCTAssertTrue(active(),"Holding free graph LEFT must retain HD curves")
+        XCTAssertTrue((overlay.value as? String ?? "").contains(";cursorVector:1;"),"Free graph cursor must remain vector based")
+        tap(app,"DIAMOND");tap(app,"F1")
+        app.buttons["DOWN"].coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).press(forDuration:1)
+        XCTAssertTrue((overlay.value as? String ?? "").hasPrefix("plot:0;"),"Trace overlay must not cover Y= scrolling")
     }
 
     func testHDPlotProgressesWithTwoFunctions() {
@@ -743,4 +785,45 @@ final class Graph89UITests: XCTestCase {
         tap(app, "Done")
     }
 
+}
+
+// Slider persistence uses a separate settings domain from the normal app.
+extension Graph89UITests {
+    func testGraphCursorSpeedSetting() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session"]
+        app.launch();tap(app,"Configuration Settings")
+        let slider=app.sliders["Graph Cursor Speed"]
+        XCTAssertTrue(slider.waitForExistence(timeout:10))
+        XCTAssertEqual(slider.value as? String,"3x")
+        slider.adjust(toNormalizedSliderPosition:1)
+        XCTAssertEqual(slider.value as? String,"10x")
+        tap(app,"Done");app.terminate()
+        app.launchArguments=["--ui-test"];app.launch();tap(app,"Configuration Settings")
+        XCTAssertEqual(slider.value as? String,"10x")
+        slider.adjust(toNormalizedSliderPosition:0)
+        XCTAssertEqual(slider.value as? String,"1x")
+        tap(app,"Done")
+    }
+}
+
+extension Graph89UITests {
+    func testHDIntersectionPrompts() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-sharp-text","--ui-test-hd-plot-multiple"]
+        app.launch();tap(app,"DIAMOND");tap(app,"F3")
+        let overlay=app.otherElements["Sharp text rendering"]
+        func active()->Bool {(Int((overlay.value as? String ?? "").components(separatedBy:";")[0].replacingOccurrences(of:"plot:",with:"")) ?? 0)>2400}
+        XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_ ,_ in active() && (app.staticTexts["Engine status"].value as? String ?? "").hasSuffix(",0")},object:overlay)],timeout:45),.completed)
+        func capture(_ name:String) {
+            XCTAssertTrue(active(),"Intersection must preserve both HD curves")
+            let shot=XCTAttachment(screenshot:app.screenshot());shot.name=name;shot.lifetime = .keepAlways;add(shot)
+        }
+        tap(app,"F5");tap(app,"K5");capture("1st Curve")
+        tap(app,"ENTER");capture("2nd Curve")
+        tap(app,"ENTER");capture("Lower Bound")
+        for _ in 0..<8 {tap(app,"LEFT")};tap(app,"ENTER");capture("Upper Bound")
+        for _ in 0..<20 {tap(app,"RIGHT")};tap(app,"ENTER");Thread.sleep(forTimeInterval:1);capture("Intersection")
+        tap(app,"ESC");capture("Intersection closed")
+    }
 }

@@ -44,6 +44,8 @@ public class CalculatorConfiguration
 	public boolean CompactLayout = false;
 	public static final String HDPlotKey = "CONF_HD_PLOT";
 	public boolean HDPlot = false;
+    public static final String GraphCursorSpeedKey = "CONF_GRAPH_CURSOR_SPEED";
+    public int GraphCursorSpeed = 3;
 
 	public boolean				ZoomMode				= true;
 	public int					ScreenScale				= -1;

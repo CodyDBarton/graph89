@@ -47,6 +47,7 @@
 #include "bits.h"
 #include "ports.h"
 #include "tichars.h"
+#include "hdplot.h"
 
 static TiKey key_states[NB_MAX_KEYS];
 static int  *key_row;
@@ -179,6 +180,7 @@ int KeyBufferPop()
 
 void ti68k_kbd_set_key(int key, int active)
 {
+    hdplot_key_event(key,active);
 	if(key == TIKEY_ALPHA)
 	{
 		if(active)

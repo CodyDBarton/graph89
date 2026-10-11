@@ -33,6 +33,7 @@ final class SharpTextRenderer {
     private final boolean available;
     private final RectF familyBounds = new RectF();
 
+    private final SharpTextRecognizer.Glyph[] plotNumbers=new SharpTextRecognizer.Glyph[10];
     private static Typeface approvedTypeface;
     static void initialize(Context context) {
         if (approvedTypeface == null)
@@ -103,6 +104,16 @@ final class SharpTextRenderer {
             lastRecognitionPixels=recognitionPixels.clone();lastWidth=width;lastHeight=height;lastHDGraph=hdGraph;
         }
         cells = recognizer.retained(packets, fallback);
+    }
+
+    void drawPlotNumber(Canvas canvas,int code,float x,float y,int on,int off) {
+        if(!available)return;
+        SharpTextRecognizer.Glyph glyph=plotNumbers[code-48];
+        if(glyph==null)plotNumbers[code-48]=glyph=new SharpTextRecognizer.Glyph(1,6,8,(char)code,new int[8]);
+        int saved=canvas.save();canvas.translate(x,y);canvas.clipRect(0,0,6,8);
+        background.setColor(off);canvas.drawRect(0,0,6,8,background);
+        ink.setColor(on);ink.setStyle(Paint.Style.FILL);canvas.drawPath(outline(glyph),ink);
+        canvas.restoreToCount(saved);
     }
 
     private Path outline(SharpTextRecognizer.Glyph g) {
@@ -219,6 +230,15 @@ final class SharpTextRenderer {
         canvas.restoreToCount(saved);
     }
     void draw(Canvas canvas, Rect destination, int width, int height, int onColor, int offColor) {
+        draw(canvas,destination,width,height,onColor,offColor,null);
+    }
+    private boolean nativeCursor(SharpTextRecognizer.Cell c,byte[] overlay) {
+        if(overlay==null || overlay.length!=16000 || c.y>=83 || c.y+c.glyph.height<=16)return false;
+        for(int y=Math.max(16,c.y);y<Math.min(83,c.y+c.glyph.height);y++)
+            for(int x=Math.max(0,c.x);x<Math.min(159,c.x+c.glyph.width);x++)if((overlay[y*160+x]&4)!=0)return true;
+        return false;
+    }
+    void draw(Canvas canvas, Rect destination, int width, int height, int onColor, int offColor,byte[] overlay) {
         if (!available || pixels == null) return;
         float sx = destination.width() / (float)width, sy = destination.height() / (float)height;
         int outer = canvas.save(); canvas.clipRect(destination);
@@ -229,6 +249,7 @@ final class SharpTextRenderer {
                 destination.left+(px+1)*sx,destination.top+(py+1)*sy,background);
         }
         for (SharpTextRecognizer.Cell cell : cells) {
+            if(nativeCursor(cell,overlay))continue;
             SharpTextRecognizer.Glyph g = cell.glyph;
             if (g.character == 0 || g.maxX < g.minX) continue;
             int savedClip=canvas.save();

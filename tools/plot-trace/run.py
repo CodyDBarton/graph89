@@ -57,10 +57,26 @@ for mode in ["observe"]:
             with (run_dir/'run.log').open('w') as log:
                 subprocess.run([str(exe),str(args.rom.resolve()),str(run_dir),str(factor),'sin(x^2)',mode],stdout=log,stderr=subprocess.STDOUT,check=True)
 
+    for factor in [0,8]:
+        run_dir=args.output/('navigation-hd' if factor else 'navigation-original');run_dir.mkdir(exist_ok=True)
+        with (run_dir/'run.log').open('w') as log:
+            subprocess.run([str(exe),str(args.rom.resolve()),str(run_dir),str(factor),'x^2','navigation'],stdout=log,stderr=subprocess.STDOUT,check=True)
+
+    for factor in [0,8]:
+        run_dir=args.output/('intersection-hd' if factor else 'intersection-original');run_dir.mkdir(exist_ok=True)
+        with (run_dir/'run.log').open('w') as log:
+            subprocess.run([str(exe),str(args.rom.resolve()),str(run_dir),str(factor),'x^2\n1','intersection'],stdout=log,stderr=subprocess.STDOUT,check=True)
+
     for mode in ['resume','disable','interrupt']:
         run_dir=args.output/mode;run_dir.mkdir(exist_ok=True)
         with (run_dir/'run.log').open('w') as log:
             subprocess.run([str(exe),str(args.rom.resolve()),str(run_dir),'8','sin(x^2)',mode],stdout=log,stderr=subprocess.STDOUT,check=True)
+
+    for factor in [0,8]:
+        for speed in [1,3]:
+            run_dir=args.output/('held-%d-speed-%d'%(factor,speed));run_dir.mkdir(exist_ok=True)
+            with (run_dir/'run.log').open('w') as log:
+                subprocess.run([str(exe),str(args.rom.resolve()),str(run_dir),str(factor),'sin(x^2)','held-'+str(speed)],stdout=log,stderr=subprocess.STDOUT,check=True)
 
 import math
 functions={'oscillating':lambda x:math.sin(x*x),'pole':lambda x:1/x,'domain':lambda x:math.sqrt(x),'tangent':math.tan,'polynomial':lambda x:x*x}
@@ -84,7 +100,8 @@ for name,fn in functions.items():
     assert (hd/'restored.background.pgm').read_bytes()==(hd/'graph.background.pgm').read_bytes(),name+': saved axes changed after restore'
     assert (hd/'regraph.points').read_text()==(hd/'graph.points').read_text(),name+': regraph changed vectors'
     assert (hd/'regraph.background.pgm').read_bytes()==(hd/'graph.background.pgm').read_bytes(),name+': regraph retained old curves in background'
-    assert not (hd/'menu.points').read_text().strip(),name+': graph overlay leaked into menu'
+    assert (hd/'menu.points').read_text()==(hd/'graph.points').read_text(),name+': HD curve disappeared behind menu'
+    assert 255 in (hd/'menu.overlay.pgm').read_bytes()[-16000:],name+': menu is not preserved above HD plot'
     assert (hd/'returned.points').read_text()==(hd/'graph.points').read_text(),name+': graph did not survive menu close'
     assert not (hd/'disabled.points').read_text().strip(),name+': original toggle failed'
     assert not (hd/'home.points').read_text().strip(),name+': graph overlay leaked into Home'
@@ -129,7 +146,8 @@ for name in ['oscillating','polynomial','window','coarse','grid','axes-off','box
         assert [79.5,16.5,79.5,92.5] in geometry and [0.5,54.5,158.5,54.5] in geometry
         assert any(abs(x-8.4)<0.0001 for x,y,u,v in geometry),'Tick coordinates were rounded to LCD columns'
         assert not any((hd/'graph.background.pgm').read_bytes()[-16000:][y*160+x]==30 for y in range(16,93) for x in range(159)),'Raster axis pixels survived'
-    assert not (hd/'menu.axes').read_text().strip() and not (hd/'disabled.axes').read_text().strip()
+    assert (hd/'menu.axes').read_text()==(hd/'graph.axes').read_text(),name+': axes disappeared behind menu'
+    assert not (hd/'disabled.axes').read_text().strip()
     print(name,': vector axes/grid captured, original LCD and cache preserved; segments=',len(geometry))
 
 empty=args.output/'empty-hd'
@@ -163,3 +181,89 @@ for mode in ['progress','incremental','incremental-restored']:
                 assert abs(y-fn(x))<0.0001,(mode,x,y)
 
     print(mode,': progressive HD frames=',frames,'no raster fallback or native curves in background')
+
+# Navigation overlays change LCD pixels without changing the plotted function.
+nav=args.output/'navigation-hd';original=args.output/'navigation-original'
+reference=(nav/'graph.pgm').read_bytes()[-16000:]
+for name in ['cursor-right','cursor-up','trace','trace-right','trace-left','trace-up','trace-down','trace-exit','zoom-menu','zoom-return','math-menu','math-return','value-prompt','value-return','graph-return']:
+    assert (nav/(name+'.pgm')).read_bytes()==(original/(name+'.pgm')).read_bytes(),name+': native interaction changed'
+    assert (nav/(name+'.points')).read_text()==(nav/'graph.points').read_text(),name+': HD curve lost/changed'
+    assert (nav/(name+'.axes')).read_text()==(nav/'graph.axes').read_text(),name+': HD axes lost'
+    cursor_mask=(nav/(name+'.cursor.pgm')).read_bytes()[-16000:]
+    pixels=(nav/(name+'.pgm')).read_bytes()[-16000:];mask=(nav/(name+'.overlay.pgm')).read_bytes()[-16000:]
+    for y in range(16,93):
+        for x in range(159):
+            i=y*160+x
+            if pixels[i]!=reference[i]: assert mask[i]==255 or cursor_mask[i]==255,(name,'Navigation overlay erased',x,y)
+    assert sum(mask[i]==0 for y in range(16,93) for x in range(159) for i in [y*160+x])>1000,name+': whole graph became raster'
+assert not (nav/'y-editor.points').read_text().strip(),'HD graph covered Y= editor'
+for name in ['cursor-right','trace-right','trace-up']:
+    mask=(nav/(name+'.overlay.pgm')).read_bytes()[-16000:]
+    assert sum(mask[i]==255 for y in range(16,83) for x in range(140) for i in [y*160+x])<=169,(name,'Cursor replaced too much graph')
+print('Cursor arrows, Trace movement, popup menus and Value prompt retain HD curves/axes and preserve native overlays; Y= remains untouched.')
+
+assert (nav/'zoom-in.pgm').read_bytes()==(original/'zoom-in.pgm').read_bytes(),'Zoom changed native calculation'
+assert len((nav/'zoom-in.points').read_text().splitlines())>1200,'Zoomed window did not regenerate HD samples'
+assert (nav/'zoom-in.points').read_text()!=(nav/'graph.points').read_text(),'Zoom incorrectly reused old-window vectors'
+print('Zoom regenerates HD samples for the changed window; original pixels remain identical.')
+
+for name in ['cursor-right','trace-right','trace-up']:
+    mask=(nav/(name+'.cursor.pgm')).read_bytes()[-16000:]
+    assert 0<sum(v==255 for v in mask)<=169,(name,'Native cursor needs explicit glyph protection')
+print('Native cursor patches are explicitly protected from Sharp Text replacement.')
+
+for name in ['cursor-right','cursor-up','trace','trace-right','trace-left','trace-up','trace-down']:
+    markers=[list(map(float,line.split())) for line in (nav/(name+'.navigation')).read_text().splitlines()]
+    assert any(row[0] in [-1,-2] for row in markers),(name,'Missing verified vector cursor')
+    if name.startswith('trace'):
+        assert [49,148,18] in markers,(name,'Missing sharp plot number')
+for name in ['graph','y-editor','home','disabled']:
+    assert not (nav/(name+'.navigation')).read_text().strip(),(name,'Stale graph navigation artwork')
+print('Verified circle/cross identity and sharp plot number follow every Trace/arrow movement and disappear outside the graph.')
+
+blink_phases=set()
+for index in range(8):
+    name='trace-blink-'+str(index)
+    markers=[list(map(float,line.split())) for line in (nav/(name+'.navigation')).read_text().splitlines()]
+    blink_phases.update(row[0] for row in markers if row[0]<0)
+    assert [49,148,18] in markers,(name,'Plot number disappeared during cursor blinking')
+assert blink_phases=={-1,-2},('Both native cursor blink phases must remain vector based',blink_phases)
+print('Both cursor blink phases use vector metadata; the plot ID remains sharp throughout.')
+
+for factor in [0,8]:
+    baseline=args.output/('held-%d-speed-1'%factor);fast=args.output/('held-%d-speed-3'%factor)
+    frames=lambda p:[list(map(int,line.split())) for line in (p/'held.txt').read_text().splitlines()]
+    original,accelerated=frames(baseline),frames(fast)
+    ratio=accelerated[-1][1]/original[-1][1]
+    assert 2.8<ratio<3.3,('Trace hold multiplier',factor,ratio)
+    assert next(r[0] for r in original if r[1])==next(r[0] for r in accelerated if r[1]),'Initial hold delay changed'
+    assert (baseline/'y-held.pgm').read_bytes()==(fast/'y-held.pgm').read_bytes(),'Y= scrolling changed'
+    assert (fast/'scope.txt').read_text()=='released 1\nfree 3\ny 1\n','Graph speed leaked outside held graph cursors'
+    free=lambda p:[list(map(int,line.split())) for line in (p/'free.txt').read_text().splitlines()]
+    normal_free,fast_free=free(baseline),free(fast)
+    free_ratio=fast_free[-1][1]/normal_free[-1][1]
+    assert 2.8<free_ratio<3.3,('Free graph cursor multiplier',factor,free_ratio)
+    for directory in [baseline,fast]:
+        for file in ['held','free','reheld']:
+            rows=[list(map(int,line.split())) for line in (directory/(file+'.txt')).read_text().splitlines()]
+            assert all(r[1]<=1 for r in rows if r[0]<50),(file,'Repeated before 0.5s')
+            assert all(r[-1]==1 for r in rows if r[0]<50),(file,'Boosted before 0.5s')
+        repeated=[list(map(int,line.split())) for line in (directory/'reheld.txt').read_text().splitlines()]
+        assert repeated[-1][1]>1,'Repeated hold never resumed movement'
+    assert next(r[0] for r in accelerated if r[-1]==3)==50,'Trace speed must begin at 0.5s'
+    assert next(r[0] for r in fast_free if r[-1]==3)==50,'Free graph speed must begin at 0.5s'
+    if factor:
+        assert all(r[5] in [-1,-2,-3,-4] for r in original+accelerated),'Held cursor became raster'
+        assert any(r[5]==-3 for r in accelerated),'Large held cursor was never vectorized'
+    print('Trace hold, HD=%d: %d -> %d steps (%.2fx); 0.5s graph-only repeat threshold and unchanged Y= scrolling; no raster cursor frames.'%(factor,original[-1][1],accelerated[-1][1],ratio))
+
+intersection=args.output/'intersection-hd'
+for name,width in [('first-curve',60),('second-curve',60),('lower-bound',72),('upper-bound',72),('intersection-result',72)]:
+    mask=(intersection/(name+'.overlay.pgm')).read_bytes()[-16000:]
+    assert all(mask[y*160+x] for y in range(76,84) for x in range(5,5+width)),(name,'Prompt cell clipped by HD plot')
+    cursor=(intersection/(name+'.cursor.pgm')).read_bytes()[-16000:]
+    assert not any(cursor[y*160+x] for y in range(76,84) for x in range(5,5+width)),(name,'Prompt mistaken for cursor')
+    assert len((intersection/(name+'.points')).read_text().splitlines())>2400,(name,'Lost HD curves')
+print('All five intersection prompts preserve complete text rectangles and both HD curves.')
+closed_mask=(intersection/'intersection-closed.overlay.pgm').read_bytes()[-16000:]
+assert not any(closed_mask[76*160:84*160]),'Intersection left a stale prompt mask'

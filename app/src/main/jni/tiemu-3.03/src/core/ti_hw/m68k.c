@@ -169,6 +169,8 @@ int hw_m68k_run(int n)
 
     hdtext_run_begin();
     hdplot_run_begin();
+    int trace_multiplier=hdplot_trace_multiplier();
+    if(trace_multiplier>1 && n<=2147483647/trace_multiplier)n*=trace_multiplier;
     for(i = 0; i < n; ++i)
 	{
 		uae_u32 opcode;

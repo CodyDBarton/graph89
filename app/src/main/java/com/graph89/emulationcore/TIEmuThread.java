@@ -227,6 +227,7 @@ public class TIEmuThread extends EmulatorThread implements Runnable
 						Activity.HandlerTerminate();
 					}
 
+                    EmulatorActivity.nativeTiEmuGraphCursorSpeed(CalculatorInstance.Configuration.GraphCursorSpeed > 0 ? CalculatorInstance.Configuration.GraphCursorSpeed : 3);
                     turbo = CalculatorInstance.Configuration.OverclockWhenBusy
                             && !ButtonState.HasHeldKeys() && EmulatorActivity.nativeTiEmuIsBusy();
                     if (turbo && !IsSleeping)

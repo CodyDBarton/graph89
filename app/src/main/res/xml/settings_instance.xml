@@ -6,6 +6,16 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent" >
 
+    <com.graph89.controls.SeekBarPreference
+        android:defaultValue="3"
+        android:dialogTitle="Graph Cursor Speed"
+        android:key="CONF_GRAPH_CURSOR_SPEED"
+        android:persistent="true"
+        android:title="Graph Cursor Speed"
+        android:summary="Held movement for free graph and Trace cursors. Starts after 0.5 seconds. Other screens are unchanged."
+        seek:minValue="1"
+        seek:maxValue="10" />
+
     <PreferenceCategory
         android:key="CONFIG_TITLE"
         android:title="" >

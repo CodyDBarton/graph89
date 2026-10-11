@@ -151,7 +151,7 @@ final class CalculatorController: UIViewController {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             stateURL = folder.appendingPathComponent(ProcessInfo.processInfo.arguments.contains("--ui-test") ? "ui-test.state" : "titanium.state")
             let image = folder.appendingPathComponent("titanium.img")
-            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock, sharpText: settings.sharpText, hdPlot: settings.hdPlot)
+            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock, sharpText: settings.sharpText, hdPlot: settings.hdPlot, cursorSpeed: settings.graphCursorSpeed)
             let arguments = ProcessInfo.processInfo.arguments
             engine.start(os: os.path, image: image.path, state: stateURL.path,
                          fresh: arguments.contains("--fresh-session"),
@@ -209,7 +209,7 @@ final class CalculatorController: UIViewController {
         let controller = ConfigurationController(settings: settings)
         controller.onChange = { [weak self] in
             guard let self else { return }
-            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText, hdPlot: self.settings.hdPlot)
+            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText, hdPlot: self.settings.hdPlot, cursorSpeed: self.settings.graphCursorSpeed)
             self.keyHaptics.configure(duration: self.settings.hapticDuration)
             self.hdDisplay.enabled = self.settings.sharpText
             self.hdDisplay.compact = self.settings.compactLayout
@@ -353,10 +353,11 @@ final class CalculatorEngine {
             DispatchQueue.main.async { completion(error) }
         }
     }
-    func configure(cpuPercent: Int, overclock: Bool, sharpText: Bool, hdPlot: Bool) {
+    func configure(cpuPercent: Int, overclock: Bool, sharpText: Bool, hdPlot: Bool, cursorSpeed: Int) {
         queue.async {
             graph89_retained_text_enable(sharpText ? 1 : 0)
             graph89_hd_plot_enable(hdPlot ? 1 : 0,8)
+            graph89_graph_cursor_speed(Int32(cursorSpeed))
             self.cpuPercent = cpuPercent
             self.overclock = overclock
             self.restart()
@@ -740,6 +741,9 @@ final class CalculatorHaptics {
 
 final class CalculatorSettings {
     private let defaults: UserDefaults
+    var graphCursorSpeed: Int {
+        didSet { defaults.set(graphCursorSpeed, forKey: "graphCursorSpeed") }
+    }
     var cpuPercent: Int {
         didSet { defaults.set(cpuPercent, forKey: "cpuPercent") }
     }
@@ -767,7 +771,8 @@ final class CalculatorSettings {
         if testing && ProcessInfo.processInfo.arguments.contains("--reset-settings") {
             defaults.removePersistentDomain(forName: "com.codybarton.graph89.settings-tests")
         }
-        defaults.register(defaults: ["cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 8])
+        defaults.register(defaults: ["graphCursorSpeed": 3, "cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 8])
+        graphCursorSpeed = min(10, max(1, defaults.integer(forKey: "graphCursorSpeed")))
         hdPlot = defaults.bool(forKey:"hdPlot")
         sharpText = defaults.bool(forKey: "sharpText")
         compactLayout = defaults.bool(forKey: "compactLayout") && sharpText
@@ -784,6 +789,8 @@ final class CalculatorSettings {
 final class ConfigurationController: UIViewController {
     private let settings: CalculatorSettings
     var onChange: (() -> Void)?
+    private let cursorSlider = UISlider()
+    private let cursorValue = UILabel()
     private let slider = UISlider()
     private let valueLabel = UILabel()
     private let turboSwitch = UISwitch()
@@ -849,6 +856,25 @@ final class ConfigurationController: UIViewController {
             limits.addArrangedSubview(label)
         }
         stack.addArrangedSubview(limits)
+        let cursorLabel = UILabel()
+        cursorLabel.text = "Graph Cursor Speed"
+        cursorLabel.font = .preferredFont(forTextStyle: .headline)
+        cursorValue.font = .monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
+        cursorValue.textAlignment = .right
+        let cursorRow = UIStackView(arrangedSubviews: [cursorLabel, cursorValue])
+        cursorRow.distribution = .fillEqually
+        stack.addArrangedSubview(cursorRow)
+        cursorSlider.minimumValue = 1
+        cursorSlider.maximumValue = 10
+        cursorSlider.accessibilityLabel = "Graph Cursor Speed"
+        cursorSlider.addTarget(self, action: #selector(cursorChanged), for: .valueChanged)
+        stack.addArrangedSubview(cursorSlider)
+        let cursorDetail = UILabel()
+        cursorDetail.text = "1–10× held movement for free graph and Trace cursors. Default: 3×. Starts after 0.5 seconds. Other screens are unchanged."
+        cursorDetail.font = .preferredFont(forTextStyle: .subheadline)
+        cursorDetail.textColor = .secondaryLabel
+        cursorDetail.numberOfLines = 0
+        stack.addArrangedSubview(cursorDetail)
         let turboLabel = UILabel()
         turboLabel.text = "Overclock when Busy"
         turboLabel.font = .preferredFont(forTextStyle: .headline)
@@ -948,6 +974,9 @@ final class ConfigurationController: UIViewController {
         updateControls()
     }
     private func updateControls() {
+        cursorSlider.value = Float(settings.graphCursorSpeed)
+        cursorValue.text = "\(settings.graphCursorSpeed)x"
+        cursorSlider.accessibilityValue = cursorValue.text
         slider.value = Float(settings.cpuPercent)
         slider.accessibilityValue = "\(settings.cpuPercent)%"
         valueLabel.text = "\(settings.cpuPercent)%"
@@ -970,6 +999,11 @@ final class ConfigurationController: UIViewController {
                 self.onChange?()
             }
         })
+    }
+    @objc private func cursorChanged() {
+        settings.graphCursorSpeed = Int(cursorSlider.value.rounded())
+        updateControls()
+        onChange?()
     }
     @objc private func speedChanged() {
         settings.cpuPercent = Int(slider.value.rounded())
@@ -1005,6 +1039,7 @@ final class ConfigurationController: UIViewController {
         settings.hdPlot = false
         settings.compactLayout = false
         settings.sharpText = false
+        settings.graphCursorSpeed = 3
         settings.cpuPercent = 100
         settings.overclock = true
         settings.stretchMode = .safeAspect
