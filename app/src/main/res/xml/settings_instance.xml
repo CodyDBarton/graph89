@@ -53,6 +53,12 @@
 
         <CheckBoxPreference
             android:defaultValue="false"
+            android:key="CONF_HD_PLOT"
+            android:title="HD Plotting (Prototype)"
+            android:summary="Plot sharp axes, ticks and grid dots, with eight curve samples per original LCD column. Use F4 ReGraph after enabling. Turn off for the original graph. Requires Solid LCD with grayscale off." />
+
+        <CheckBoxPreference
+            android:defaultValue="false"
             android:key="CONF_ENABLE_GRAYSCALE"
             android:summary="Used in certain games/apps. Enabling it will decrease the engine&apos;s performance"
             android:title="Enable Grayscale" />

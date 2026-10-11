@@ -59,6 +59,14 @@ public class EmulatorScreen
 	private volatile boolean						isBusy					= false;
 	private volatile boolean						isScreenOff				= false;
 	private SharpTextRenderer sharpText;
+	private HDPlotRenderer hdPlot;
+    // Only completed frames are shared with Canvas. Preparation owns the spare
+    // buffers and never holds the UI's ScreenChangeLock.
+    private final Object preparationLock = new Object();
+    private int[] spareData;
+    private int frameZoom=1;
+    private SharpTextRenderer spareSharpText;
+    private HDPlotRenderer spareHDPlot;
 
 	public int							CRC						= 0;
 	private int							cntr					= 0;
@@ -156,6 +164,7 @@ public class EmulatorScreen
 		ScreenBitmap.BitmapRectangle = new Rect(0, 0, mZoomedScreenWidth, mZoomedScreenHeight);
 
 		ScreenData = new int[mZoomedScreenWidth * mZoomedScreenHeight];
+        frameZoom=Zoom;
 
 		Flags = new byte[6];
 	}
@@ -187,40 +196,71 @@ public class EmulatorScreen
 		ScreenBitmap.BitmapRectangle = new Rect(0, 0, mZoomedScreenWidth, mZoomedScreenHeight);
 
 		ScreenData = new int[mZoomedScreenWidth * mZoomedScreenHeight];
+        frameZoom=Zoom;
 
 		Flags = new byte[6];
 	}
 
-	public void refresh()
-	{
-		synchronized (EmulatorScreen.ScreenChangeLock)
-		{
-			++cntr;
-            EmulatorActivity.nativeTiEmuRetainedTextEnable(useSharpText());
-
-			if (EngineScreenParams.RawHeight != mRawScreenHeight || EngineScreenParams.RawWidth != mRawScreenWidth || EngineScreenParams.Zoom != Zoom)
-			{
-				EmulatorActivity.TiEmuSetScreenParams(this);
-			}
-			
-			int newCRC = EmulatorActivity.nativeReadEmulatedScreen(Flags);
-			isScreenOff = Flags[0] != 0;
-			isBusy = Flags[1] != 0;
-
-			if (CRC != newCRC || cntr % 40 == 0)
-			{
-				CRC = newCRC;
-				EmulatorActivity.nativeGetEmulatedScreen(ScreenData);
-				if (useSharpText() && !isScreenOff)
-				{
-					if (sharpText == null) sharpText = new SharpTextRenderer();
-					sharpText.compact = EmulatorActivity.ActiveInstance.Configuration.CompactLayout;
-					sharpText.update(ScreenData, Zoom, mRawScreenWidth, mRawScreenHeight, mParentSkinBase.LCDPixelON);
-				}
-				EmulatorActivity.UIStateManagerObj.EmulatorViewIntstance.postInvalidate();
-			}
-		}
-	}
+    public void refresh() {
+        synchronized(preparationLock) {
+            long started=System.nanoTime();
+            // HD is composited as vectors at display resolution. Transfer the
+            // original LCD once; Canvas scales its raster background without
+            // duplicating every pixel into a large JNI/bitmap buffer.
+            int bufferZoom=useHDPlot()?1:Zoom;
+            boolean sharp=useSharpText(),hd=useHDPlot();
+            if(spareData==null || spareData.length!=mRawScreenWidth*mRawScreenHeight*bufferZoom*bufferZoom)
+                spareData=new int[mRawScreenWidth*mRawScreenHeight*bufferZoom*bufferZoom];
+            byte[] flags=new byte[6];
+            int newCRC;
+            boolean changed;
+            ++cntr;
+            TIEmuFrameAccess.lock.lock();
+            try {
+                EmulatorActivity.nativeTiEmuRetainedTextEnable(sharp);
+                EmulatorActivity.nativeTiEmuHDPlotEnable(hd);
+                if(EngineScreenParams.RawHeight!=mRawScreenHeight || EngineScreenParams.RawWidth!=mRawScreenWidth || EngineScreenParams.Zoom!=bufferZoom)
+                    EmulatorActivity.TiEmuSetScreenParams(this,bufferZoom);
+                newCRC=EmulatorActivity.nativeReadEmulatedScreen(flags);
+                // Extra HD samples can advance without changing native raster
+                // pixels. Poll every frame while BUSY, including its final frame;
+                // a completed unchanged screen needs no continuous redraw.
+                changed=CRC!=newCRC || cntr%40==0 || (hd && (flags[1]!=0 || isBusy || hdPlot==null));
+                if(changed) {
+                    EmulatorActivity.nativeGetEmulatedScreen(spareData);
+                    if(hd && flags[0]==0) {
+                        if(spareHDPlot==null)spareHDPlot=new HDPlotRenderer();
+                        spareHDPlot.update(spareData,bufferZoom,mRawScreenWidth,mRawScreenHeight,mParentSkinBase.LCDPixelON);
+                    } else spareHDPlot=null;
+                }
+            } finally { TIEmuFrameAccess.lock.unlock(); }
+            long captured=System.nanoTime();
+            if(changed) {
+                if(sharp && flags[0]==0) {
+                    if(spareSharpText==null)spareSharpText=new SharpTextRenderer();
+                    spareSharpText.compact=EmulatorActivity.ActiveInstance.Configuration.CompactLayout;
+                    spareSharpText.update(spareData,bufferZoom,mRawScreenWidth,mRawScreenHeight,mParentSkinBase.LCDPixelON,
+                        hd && spareHDPlot!=null && spareHDPlot.isActive());
+                } else spareSharpText=null;
+                // Canvas can finish drawing the old frame while we prepare this
+                // one. Swap all its components together, then reuse the old frame.
+                synchronized(ScreenChangeLock) {
+                    int[] oldData=ScreenData;ScreenData=spareData;spareData=oldData;
+                    SharpTextRenderer oldSharp=sharpText;sharpText=spareSharpText;spareSharpText=oldSharp;
+                    HDPlotRenderer oldPlot=hdPlot;hdPlot=spareHDPlot;spareHDPlot=oldPlot;
+                    frameZoom=bufferZoom;
+                    CRC=newCRC;
+                    isScreenOff=flags[0]!=0;isBusy=flags[1]!=0;
+                }
+                EmulatorActivity.UIStateManagerObj.EmulatorViewIntstance.postInvalidateOnAnimation();
+            } else {
+                isScreenOff=flags[0]!=0;isBusy=flags[1]!=0;
+            }
+            long done=System.nanoTime();
+            if(done-started>100_000_000L)
+                android.util.Log.w("Graph89Frame","Slow preparation: capture="+(captured-started)/1e6+"ms text/publish="+(done-captured)/1e6+"ms");
+        }
+    }
 
 	public boolean isBusy()
 	{
@@ -234,8 +274,12 @@ public class EmulatorScreen
 
 	public Bitmap getScreenShot()
 	{
-		synchronized (EmulatorScreen.ScreenChangeLock)
+		synchronized (preparationLock)
 		{
+            TIEmuFrameAccess.lock.lock();
+            try {
+            EngineScreenParams.RawWidth=mRawScreenWidth;
+            EngineScreenParams.RawHeight=mRawScreenHeight;
 			EngineScreenParams.Zoom = 3;
 
 			EmulatorActivity.nativeUpdateScreenZoom(EngineScreenParams.Zoom);
@@ -260,10 +304,21 @@ public class EmulatorScreen
 					EngineScreenParams.RawWidth, EngineScreenParams.RawHeight, mParentSkinBase.LCDPixelON, mParentSkinBase.LCDPixelOFF);
 			}
 
+            if(useHDPlot() && flags[0]==0){
+                HDPlotRenderer renderer=new HDPlotRenderer();
+                renderer.update(data,EngineScreenParams.Zoom,EngineScreenParams.RawWidth,EngineScreenParams.RawHeight,mParentSkinBase.LCDPixelON);
+                renderer.draw(new Canvas(screenshotBitmap),new Rect(0,0,screenshotBitmap.getWidth(),screenshotBitmap.getHeight()),mParentSkinBase.LCDPixelON,mParentSkinBase.LCDPixelOFF);
+            }
 			return screenshotBitmap;
+            } finally { TIEmuFrameAccess.lock.unlock(); }
 		}
 	}
 
+    boolean useHDPlot(){
+        if(EmulatorActivity.ActiveInstance==null)return false;
+        CalculatorConfiguration c=EmulatorActivity.ActiveInstance.Configuration;
+        return c.HDPlot && !c.EnableGrayScale && !c.UseLCDGrid && EmulatorActivity.ActiveInstance.CalculatorType==CalculatorTypes.TI89T;
+    }
 	private boolean useSharpText()
 	{
 		if (EmulatorActivity.ActiveInstance == null) return false;
@@ -277,16 +332,17 @@ public class EmulatorScreen
 	{
 		synchronized (EmulatorScreen.ScreenChangeLock)
 		{
-			ScreenBitmap.BitmapObj.setPixels(ScreenData, 0, ScreenBitmap.BitmapObj.getWidth(), 0, 0, ScreenBitmap.BitmapObj.getWidth(), ScreenBitmap.BitmapObj.getHeight());
+            int bufferWidth=mRawScreenWidth*frameZoom,bufferHeight=mRawScreenHeight*frameZoom;
+            if(ScreenBitmap.BitmapObj.getWidth()!=bufferWidth || ScreenBitmap.BitmapObj.getHeight()!=bufferHeight) {
+                ScreenBitmap.BitmapObj=Bitmap.createBitmap(bufferWidth,bufferHeight,Bitmap.Config.ARGB_8888);
+                ScreenBitmap.BitmapRectangle=new Rect(0,0,bufferWidth,bufferHeight);
+            }
+            ScreenBitmap.BitmapObj.setPixels(ScreenData,0,bufferWidth,0,0,bufferWidth,bufferHeight);
+            Rect bitmapDestination=mIntegerZoom?new Rect(DestinationRectangle.left,DestinationRectangle.top,
+                DestinationRectangle.left+mZoomedScreenWidth,DestinationRectangle.top+mZoomedScreenHeight):DestinationRectangle;
+            if(mIntegerZoom && frameZoom==Zoom)canvas.drawBitmap(ScreenBitmap.BitmapObj,DestinationRectangle.left,DestinationRectangle.top,null);
+            else canvas.drawBitmap(ScreenBitmap.BitmapObj,ScreenBitmap.BitmapRectangle,bitmapDestination,frameZoom==1?null:mDrawingPaint);
 
-			if (mIntegerZoom)
-			{
-				canvas.drawBitmap(ScreenBitmap.BitmapObj, DestinationRectangle.left, DestinationRectangle.top, null);
-			}
-			else
-			{
-				canvas.drawBitmap(ScreenBitmap.BitmapObj, ScreenBitmap.BitmapRectangle, DestinationRectangle, mDrawingPaint);
-			}
 			if (sharpText != null && useSharpText() && !isScreenOff)
 			{
 				// Integer bitmap drawing uses its own height, which can differ from
@@ -295,6 +351,10 @@ public class EmulatorScreen
 					DestinationRectangle.left + mZoomedScreenWidth, DestinationRectangle.top + mZoomedScreenHeight) : DestinationRectangle;
 				sharpText.draw(canvas, actual, mRawScreenWidth, mRawScreenHeight, mParentSkinBase.LCDPixelON, mParentSkinBase.LCDPixelOFF);
 			}
+            if(hdPlot!=null && useHDPlot() && !isScreenOff){
+                Rect actual=mIntegerZoom?new Rect(DestinationRectangle.left,DestinationRectangle.top,DestinationRectangle.left+mZoomedScreenWidth,DestinationRectangle.top+mZoomedScreenHeight):DestinationRectangle;
+                hdPlot.draw(canvas,actual,mParentSkinBase.LCDPixelON,mParentSkinBase.LCDPixelOFF);
+            }
 		}
 	}
 

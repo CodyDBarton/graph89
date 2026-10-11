@@ -44,6 +44,7 @@
 
 #include "libuae.h"
 #include "hdtext.h"
+#include "hdplot.h"
 #include "ti68k_int.h"
 #include "ti68k_err.h"
 #include "flash.h"
@@ -241,6 +242,8 @@ int ti68k_state_load(const char *filename)
 			fread(&tihw.rom[i<<16], 1, 65536, f);
     }
     
+    hdplot_load_pending(f);
+
 	// Update UAE structures
 	m68k_setpc(m68k_getpc());
     MakeFromSR();
@@ -365,6 +368,7 @@ int ti68k_state_save(const char *filename)
 			fwrite(&tihw.rom[i<<16], 1, 65536, f);
     }
 
+    hdplot_save_pending(f);
     fclose(f);
 
   	return 0;

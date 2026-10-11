@@ -156,3 +156,5 @@ Structure-specific gap caps refine the generic empty-space rule: raised powers u
 Repacking preserves the native lower scrolling boundary: newer entries lying fully below the original viewport stay below it. A dedicated fixture verifies that such rows cannot displace selected older history.
 
 Compact Y= layout also remains active when Plot1/2/3 is selected. The verified list paint pass is independent of whether the bottom equation editor is focused. Plot dialogs and other calculator screens retain their existing layout.
+
+HD Plotting renders vector axes, ticks and grid dots, and adds real ROM evaluations for ordinary Titanium AMS 3.10 function graphs, with eight samples per native LCD column. It is independent of Sharp Text; use Solid LCD and disable grayscale. Enable it in Configuration Settings and use Graph F4 ReGraph. Original display is available by turning the setting off; other modes/styles and trace views stay original. See [the plotting prototype](../../tools/plot-trace/README.md).

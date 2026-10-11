@@ -701,16 +701,17 @@ public class EmulatorActivity extends Graph89ActivityBase
 		}
 	}
 
-	public static void TiEmuSetScreenParams(EmulatorScreen screen)
+	public static void TiEmuSetScreenParams(EmulatorScreen screen) { TiEmuSetScreenParams(screen,screen.Zoom); }
+    static void TiEmuSetScreenParams(EmulatorScreen screen,int zoom)
 	{
-		synchronized (EmulatorScreen.ScreenChangeLock)
-		{
+        TIEmuFrameAccess.lock.lock();
+        try {
 			EmulatorScreen.EngineScreenParams.RawHeight = screen.mRawScreenHeight;
 			EmulatorScreen.EngineScreenParams.RawWidth = screen.mRawScreenWidth;
-			EmulatorScreen.EngineScreenParams.Zoom = screen.Zoom;
+			EmulatorScreen.EngineScreenParams.Zoom = zoom;
 			
-			nativeUpdateScreenZoom(screen.Zoom);
-		}
+			nativeUpdateScreenZoom(zoom);
+        } finally { TIEmuFrameAccess.lock.unlock(); }
 	}
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -801,6 +802,9 @@ public class EmulatorActivity extends Graph89ActivityBase
 	public native static void nativeCleanGraph89();
 	public native static int  nativeInstallROM(String rom_source, String rom_destination, int calc_type, int is_rom);
 	public native static byte[] nativeTiEmuGetFontTemplates();
+    public native static void nativeTiEmuHDPlotEnable(boolean enabled);
+    public native static float[] nativeTiEmuGetHDPlotDecorations();
+    public native static float[] nativeTiEmuGetHDPlot(boolean[] pixels,byte[] background);
     public native static void nativeTiEmuRetainedTextEnable(boolean enabled);
     public native static int[] nativeTiEmuGetRetainedText(boolean[] pixels);
 

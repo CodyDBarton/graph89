@@ -32,6 +32,7 @@ src/core/ti_hw/hwprot.c \
 src/core/ti_hw/kbd.c \
 src/core/ti_hw/m68k.c \
 src/core/ti_hw/hdtext.c \
+src/core/ti_hw/hdplot.c \
 src/core/ti_hw/mem.c \
 src/core/ti_hw/mem89.c \
 src/core/ti_hw/mem89tm.c \

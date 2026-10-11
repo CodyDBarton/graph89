@@ -8,6 +8,9 @@ final class SharpTextView: UIView {
         didSet { if enabled != oldValue { cells=[]; recognize(); setNeedsDisplay() } }
     }
     var compact = false { didSet { setNeedsDisplay() } }
+    private var plot:[Float]=[]
+    private var plotBackground=Data()
+    private var plotDecorations:[Float]=[]
     private var recognizer: SharpTextRecognizer?
     private var pixels: [Bool]=[]
     private var original = Data()
@@ -40,7 +43,63 @@ final class SharpTextView: UIView {
         guard data.count==160*100 else { cells=[]; setNeedsDisplay(); return }
         original=data; pixels=SharpTextRecognizer.withoutCursor(data.map {$0==30},retained); recognize(); setNeedsDisplay()
     }
+    func updatePlot(_ next:[Float],background:Data,decorations:[Float]) {
+        if next==plot && background==plotBackground && decorations==plotDecorations {return}
+        plot=next;plotBackground=background;plotDecorations=decorations;setNeedsDisplay()
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
+            accessibilityIdentifier="Sharp text rendering"
+            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4)"
+        }
+    }
+    private func drawPlot(_ context:CGContext) {
+        guard plot.count>6,plotBackground.count==16000 else {return}
+        context.saveGState()
+        context.clip(to:CGRect(x:CGFloat(plot[0]),y:CGFloat(plot[1]),width:CGFloat(plot[2]-plot[0]),height:CGFloat(plot[3]-plot[1])))
+        context.setFillColor(UIColor(white:210/255.0,alpha:1).cgColor);context.fill(CGRect(x:0,y:16,width:159,height:77))
+        let axes=CGMutablePath()
+        for y in 16..<93 {var x=0;while x<159 {
+            if plotBackground[y*160+x]==0 {x += 1;continue}
+            let left=x;while x<159 && plotBackground[y*160+x] != 0 {x += 1}
+            axes.addRect(CGRect(x:left,y:y,width:x-left,height:1))
+        }}
+        context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor);context.addPath(axes);context.fillPath()
+        context.setStrokeColor(UIColor(white:30/255.0,alpha:1).cgColor)
+        context.setLineWidth(240/(bounds.width*contentScaleFactor));context.setLineCap(.round)
+        let geometry=CGMutablePath()
+        for i in stride(from:0,to:plotDecorations.count,by:4) {
+            let p=CGPoint(x:CGFloat(plotDecorations[i]),y:CGFloat(plotDecorations[i+1]))
+            let q=CGPoint(x:CGFloat(plotDecorations[i+2]),y:CGFloat(plotDecorations[i+3]))
+            if p==q {let radius=120/(bounds.width*contentScaleFactor);context.fillEllipse(in:CGRect(x:p.x-radius,y:p.y-radius,width:2*radius,height:2*radius))}
+            else {geometry.move(to:p);geometry.addLine(to:q)}
+        }
+        context.addPath(geometry);context.strokePath()
+        let path=CGMutablePath();var previous:CGPoint?
+        for i in stride(from:4,to:plot.count-1,by:2) {
+            let point=CGPoint(x:CGFloat(plot[i])+0.5,y:CGFloat(plot[i+1])+0.5)
+            guard point.x.isFinite,point.y.isFinite else {previous=nil;continue}
+            if let p=previous, !((p.y<16 && point.y>93)||(p.y>93 && point.y<16)) {
+                // Clip before building the graphics path. Values near poles can
+                // be enormous; they must never reach the device rasterizer.
+                let dx=point.x-p.x,dy=point.y-p.y
+                var lo:CGFloat=0,hi:CGFloat=1,valid=true
+                for (d,q) in [(-dx,p.x-CGFloat(plot[0])),(dx,CGFloat(plot[2])-p.x),(-dy,p.y-CGFloat(plot[1])),(dy,CGFloat(plot[3])-p.y)] {
+                    if d==0 {if q<0 {valid=false};continue}
+                    let t=q/d
+                    if d<0 {lo=max(lo,t)} else {hi=min(hi,t)}
+                }
+                if valid && lo<=hi {
+                    path.move(to:CGPoint(x:p.x+lo*dx,y:p.y+lo*dy))
+                    path.addLine(to:CGPoint(x:p.x+hi*dx,y:p.y+hi*dy))
+                }
+            }
+            previous=point
+        }
+        context.setStrokeColor(UIColor(white:30/255.0,alpha:1).cgColor)
+        context.setLineWidth(240/(bounds.width*contentScaleFactor));context.setLineJoin(.round);context.setLineCap(.round)
+        context.addPath(path);context.strokePath();context.restoreGState()
+    }
     private func recognize() {
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {accessibilityIdentifier="Sharp text rendering";accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4)";if !enabled {cells=[];fallback=[];return}}
         guard enabled, font != nil, pixels.count==160*100, let recognizer else { cells=[]; fallback=[]; accessibilityHint="retained:0"; accessibilityValue = "off:0"; return }
         fallback=recognizer.stable(pixels,fallback)
         cells=recognizer.retained(retained,fallback:fallback)
@@ -190,10 +249,10 @@ final class SharpTextView: UIView {
         context.restoreGState()
     }
     override func draw(_ rect:CGRect) {
-        guard enabled, let context=UIGraphicsGetCurrentContext(), pixels.count==160*100 else { return }
+        guard enabled || !plot.isEmpty, let context=UIGraphicsGetCurrentContext(), pixels.count==160*100 else { return }
         // Clear in native pixel coordinates before scaling. Erasing separately
         // above a UIImageView can leave subpixel fragments at fractional zoom.
-        let scene = compact ? recognizer?.compactScene(retained) : nil
+        let scene = enabled && compact ? recognizer?.compactScene(retained) : nil
         var cleaned = pixels.map { UInt8($0 ? 30:210) }
         if scene?.body == true { for y in 16..<83 { for x in 0..<160 { cleaned[y*160+x]=210 } } }
         if scene?.input == true { for y in 84..<93 { for x in 0..<160 { cleaned[y*160+x]=210 } } }
@@ -236,6 +295,7 @@ final class SharpTextView: UIView {
                 context.fill(CGRect(x:Double(cursor.x)+0.7,y:Double(85+y),width:0.6,height:1))
             }
         }
+        drawPlot(context)
         context.restoreGState()
     }
 }

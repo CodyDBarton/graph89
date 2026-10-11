@@ -19,7 +19,7 @@ def ref(path, kind):
 swift=ref('App/Graph89App.swift','sourcecode.swift')
 sharpSources=[ref('App/SharpTextRecognizer.swift','sourcecode.swift'),ref('App/SharpTextView.swift','sourcecode.swift')]
 bridge=ref('App/Graph89-Bridging-Header.h','sourcecode.c.h')
-resources=[ref('../app/src/main/assets/fonts/Graph89HD.ttf','file'),ref('../TI89Titanium_OS.89u','file'),ref('../app/src/main/assets/portrait/ti89tclassic/skin.jpg','image.jpeg'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonmask.bin','file'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonloaction.location','text')]
+resources=[ref('App/Assets.xcassets','folder.assetcatalog'),ref('../app/src/main/assets/fonts/Graph89HD.ttf','file'),ref('../TI89Titanium_OS.89u','file'),ref('../app/src/main/assets/portrait/ti89tclassic/skin.jpg','image.jpeg'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonmask.bin','file'),ref('../app/src/main/assets/portrait/ti89tclassic/buttonloaction.location','text')]
 product=add('PBXFileReference',explicitFileType='wrapper.application',path='Graph89.app',sourceTree='BUILT_PRODUCTS_DIR')
 products=add('PBXGroup',children=[product],name='Products',sourceTree='<group>')
 group=add('PBXGroup',children=[swift,*sharpSources,bridge,*resources,products],sourceTree='<group>')
@@ -29,6 +29,7 @@ frameworkphase=add('PBXFrameworksBuildPhase',buildActionMask=2147483647,files=[]
 nativephase=add('PBXShellScriptBuildPhase',buildActionMask=2147483647,files=[],inputPaths=[],outputPaths=[],runOnlyForDeploymentPostprocessing=0,alwaysOutOfDate=1,name='Build calculator engine',shellPath='/bin/sh',shellScript='set -eu\n/usr/bin/python3 "$SRCROOT/tools/build_native.py" --sdk "$PLATFORM_NAME"\n')
 settings={
  'PRODUCT_BUNDLE_IDENTIFIER':'com.codybarton.graph89.ios',
+ 'ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon',
  'PRODUCT_NAME':'Graph89', 'SDKROOT':'iphoneos', 'IPHONEOS_DEPLOYMENT_TARGET':'16.0',
  'TARGETED_DEVICE_FAMILY':'1,2', 'SUPPORTED_PLATFORMS':'iphoneos iphonesimulator',
  'ARCHS':'arm64', 'SWIFT_VERSION':'5.0', 'SWIFT_OBJC_BRIDGING_HEADER':'App/Graph89-Bridging-Header.h',

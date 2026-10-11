@@ -26,6 +26,9 @@ final class SharpTextRenderer {
     private final Paint background = new Paint();
     private boolean attemptedFonts;
     private boolean[] pixels;
+    private boolean[] lastRecognitionPixels;
+    private int lastWidth,lastHeight;
+    private boolean lastHDGraph;
     private int[] cursor;
     private final boolean available;
     private final RectF familyBounds = new RectF();
@@ -58,9 +61,15 @@ final class SharpTextRenderer {
     }
 
     void update(int[] screen, int zoom, int width, int height, int onColor) {
+        update(screen,zoom,width,height,onColor,false);
+    }
+    void update(int[] screen,int zoom,int width,int height,int onColor,boolean hdGraph) {
         if (!available) return;
         if (!attemptedFonts) {
-            byte[] fonts = EmulatorActivity.nativeTiEmuGetFontTemplates();
+            byte[] fonts;
+            TIEmuFrameAccess.lock.lock();
+            try { fonts=EmulatorActivity.nativeTiEmuGetFontTemplates(); }
+            finally { TIEmuFrameAccess.lock.unlock(); }
             if (fonts != null) {
                 if (fonts.length != 0) recognizer = new SharpTextRecognizer(fonts);
                 attemptedFonts = true;
@@ -71,11 +80,28 @@ final class SharpTextRenderer {
         for (int y = 0; y < height; ++y)
             for (int x = 0; x < width; ++x)
                 pixels[y * width + x] = screen[(y * zoom + zoom / 2) * width * zoom + x * zoom + zoom / 2] == onColor;
-        int[] packets=EmulatorActivity.nativeTiEmuGetRetainedText(pixels);
+        int[] packets;
+        TIEmuFrameAccess.lock.lock();
+        try { packets=EmulatorActivity.nativeTiEmuGetRetainedText(pixels); }
+        finally { TIEmuFrameAccess.lock.unlock(); }
         retained=packets;
         cursor=SharpTextRecognizer.cursor(packets);
         pixels=SharpTextRecognizer.withoutCursor(pixels,packets);
-        fallback = recognizer.recognizeStable(pixels, width, height, fallback);
+        // The HD graph completely replaces this raster region. Searching
+        // the changing pixel curves for letters is wasted work and can dominate
+        // frame time. Keep the toolbar/status and the original pixels intact.
+        boolean[] recognitionPixels=pixels;
+        if(hdGraph && width==160 && height==100) {
+            recognitionPixels=pixels.clone();
+            java.util.Arrays.fill(recognitionPixels,16*160,93*160,false);
+        }
+        // The evolving vector graph is excluded from fallback recognition.
+        // Unchanged chrome needs no new search; native identities still merge
+        // every frame and any pixel, geometry or graph-mode change invalidates.
+        if(lastWidth!=width || lastHeight!=height || lastHDGraph!=hdGraph || !java.util.Arrays.equals(lastRecognitionPixels,recognitionPixels)) {
+            fallback = recognizer.recognizeStable(recognitionPixels,width,height,fallback,hdGraph);
+            lastRecognitionPixels=recognitionPixels.clone();lastWidth=width;lastHeight=height;lastHDGraph=hdGraph;
+        }
         cells = recognizer.retained(packets, fallback);
     }
 

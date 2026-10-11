@@ -25,6 +25,7 @@
 #include <ti68k_def.h>
 #include <string.h>
 #include "hdtext.h"
+#include "hdplot.h"
 
 extern JNIEnv * DbusJNIenv;
 JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuStep1LoadDefaultConfig(JNIEnv * env, jobject obj)
@@ -202,4 +203,19 @@ JNIEXPORT jintArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nati
     jintArray result=(*env)->NewIntArray(env,count*12);
     if(result)(*env)->SetIntArrayRegion(env,result,0,count*12,(const jint *)packets);
     return result;
+}
+
+JNIEXPORT void JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuHDPlotEnable(JNIEnv *env,jobject obj,jboolean enabled){hdplot_enable(enabled,8);}
+JNIEXPORT jfloatArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuGetHDPlot(JNIEnv *env,jobject obj,jbooleanArray pixels,jbyteArray background){
+ if(!pixels||!background||(*env)->GetArrayLength(env,pixels)!=16000||(*env)->GetArrayLength(env,background)!=16000)return (*env)->NewFloatArray(env,0);
+ jboolean *p=(*env)->GetBooleanArrayElements(env,pixels,NULL);if(!p)return NULL;
+ float *values=malloc(65540*sizeof(float));uint8_t base[16000];if(!values){(*env)->ReleaseBooleanArrayElements(env,pixels,p,JNI_ABORT);return NULL;}
+ int n=hdplot_copy((const uint8_t*)p,values,65540,base);(*env)->ReleaseBooleanArrayElements(env,pixels,p,JNI_ABORT);
+ jfloatArray result=(*env)->NewFloatArray(env,n);if(result && n){(*env)->SetFloatArrayRegion(env,result,0,n,values);(*env)->SetByteArrayRegion(env,background,0,16000,(const jbyte*)base);}free(values);return result;
+}
+
+JNIEXPORT jfloatArray JNICALL Java_com_graph89_emulationcore_EmulatorActivity_nativeTiEmuGetHDPlotDecorations(JNIEnv *env,jobject obj){
+ float *v=malloc(65536*sizeof(float));if(!v)return NULL;
+ int n=hdplot_copy_decorations(v,65536);jfloatArray result=(*env)->NewFloatArray(env,n);
+ if(result&&n)(*env)->SetFloatArrayRegion(env,result,0,n,v);free(v);return result;
 }

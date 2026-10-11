@@ -7,6 +7,7 @@
 #include "state.h"
 #include "engine.h"
 #include "hdtext.h"
+#include "hdplot.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -110,3 +111,7 @@ int graph89_copy_retained_text(const uint8_t *screen, int32_t *packets, int capa
     for(int i=0;i<16000;i++) pixels[i]=screen[i]==30;
     return hdtext_copy(pixels, packets, capacity);
 }
+
+int graph89_copy_hd_plot_decorations(float *segments,int capacity){return hdplot_copy_decorations(segments,capacity);}
+void graph89_hd_plot_enable(int enabled,int samples){hdplot_enable(enabled,samples);}
+int graph89_copy_hd_plot(const uint8_t *screen,float *points,int capacity,uint8_t *background){uint8_t pixels[16000];for(int i=0;i<16000;i++)pixels[i]=screen[i]==30;return hdplot_copy(pixels,points,capacity,background);}

@@ -128,6 +128,10 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 			mActiveInstance.Configuration.CompactLayout = sharedPreferences.getBoolean(CalculatorConfiguration.CompactLayoutKey, false);
 			if (mActiveInstance.Configuration.CompactLayout) sharedPreferences.edit().putBoolean(CalculatorConfiguration.SharpTextKey, true).apply();
 		}
+		else if (key.equals(CalculatorConfiguration.HDPlotKey))
+		{
+			mActiveInstance.Configuration.HDPlot = sharedPreferences.getBoolean(CalculatorConfiguration.HDPlotKey, false);
+		}
 		else if (key.equals(CalculatorConfiguration.EnableGrayScaleKey))
 		{
 			mActiveInstance.Configuration.EnableGrayScale = sharedPreferences.getBoolean(CalculatorConfiguration.EnableGrayScaleKey, false);
@@ -172,7 +176,9 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 
 			PreferenceCategory d = (PreferenceCategory) findPreference("CONFIG_CAT_DISPLAY_SETTINGS");
 
-			if (mActiveInstance.Configuration.UseLCDGrid)
+			if (mActiveInstance.CalculatorType == CalculatorTypes.TI89) d.removePreference(findPreference(CalculatorConfiguration.HDPlotKey));
+
+		if (mActiveInstance.Configuration.UseLCDGrid)
 			{
 				d.addPreference(mGridColor);
 			}
@@ -241,6 +247,7 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		editor.putBoolean(CalculatorConfiguration.EnableGrayScaleKey, mActiveInstance.Configuration.EnableGrayScale);
 		editor.putBoolean(CalculatorConfiguration.SharpTextKey, mActiveInstance.Configuration.SharpText);
 		editor.putBoolean(CalculatorConfiguration.CompactLayoutKey, mActiveInstance.Configuration.CompactLayout);
+		editor.putBoolean(CalculatorConfiguration.HDPlotKey, mActiveInstance.Configuration.HDPlot);
 
 		editor.putInt(CalculatorConfiguration.LCDColorKey, mActiveInstance.Configuration.LCDColor);
 		editor.putInt(CalculatorConfiguration.PixelOffKey, mActiveInstance.Configuration.PixelOff);
@@ -302,7 +309,10 @@ public class InstanceConfigurationPage extends PreferenceActivity implements OnS
 		{
 			d.removePreference(findPreference(CalculatorConfiguration.SharpTextKey));
 			d.removePreference(findPreference(CalculatorConfiguration.CompactLayoutKey));
+			d.removePreference(findPreference(CalculatorConfiguration.HDPlotKey));
 		}
+
+		if (mActiveInstance.CalculatorType == CalculatorTypes.TI89) d.removePreference(findPreference(CalculatorConfiguration.HDPlotKey));
 
 		if (mActiveInstance.Configuration.UseLCDGrid)
 		{

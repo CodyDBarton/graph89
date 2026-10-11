@@ -75,6 +75,7 @@ public class TIEmuThread extends EmulatorThread implements Runnable
 			{
 				try
 				{
+                    long frameStart = System.nanoTime();
 					if (!IsSleeping)
 					{
 						skin.Screen.refresh();
@@ -83,7 +84,12 @@ public class TIEmuThread extends EmulatorThread implements Runnable
 						prevScreenOff = isScreenOff;
 					}
 
-					Thread.sleep(TIEmuThread.ScreenLoopSleep);
+					// HD progress follows a ~60 Hz display cadence. Subtract the
+                    // snapshot work instead of adding a full delay after it.
+                    int interval = skin.Screen.useHDPlot() ? 16 : TIEmuThread.ScreenLoopSleep;
+                    long remaining = interval * 1_000_000L - (System.nanoTime() - frameStart);
+                    if(remaining > 0) Thread.sleep(remaining / 1_000_000L, (int)(remaining % 1_000_000L));
+                    else Thread.sleep(1);
 				}
 				catch (InterruptedException e)
 				{
@@ -229,7 +235,7 @@ public class TIEmuThread extends EmulatorThread implements Runnable
                         // lifecycle checks frequent without intentionally sleeping.
                         long deadline = System.nanoTime() + 10_000_000L;
                         do {
-                            EmulatorActivity.nativeTiEmuRunTurboChunk();
+                            TIEmuFrameAccess.runEngine(true);
                             firstCycleComplete = true;
                         } while (System.nanoTime() < deadline && !KillFlag
                                 && !LoadState && !SaveState && !ResetCalc
@@ -241,7 +247,7 @@ public class TIEmuThread extends EmulatorThread implements Runnable
                     else
                     {
                         if (!IsSleeping) {
-                            EmulatorActivity.nativeTiEmuRunEngine();
+                            TIEmuFrameAccess.runEngine(false);
                             firstCycleComplete = true;
                         }
                         Thread.sleep(sleepInterval);

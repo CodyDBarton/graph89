@@ -308,6 +308,55 @@ final class Graph89UITests: XCTestCase {
         let b=XCTAttachment(screenshot:app.screenshot());b.name="Original Y equation list";b.lifetime = .keepAlways;add(b)
     }
 
+    func testHDPlotEvaluatesAdditionalPointsAndToggle() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:20))
+        tap(app,"DIAMOND");tap(app,"F3")
+        let overlay=app.otherElements["Sharp text rendering"]
+        func count()->Int {Int((overlay.value as? String ?? "").components(separatedBy:";")[0].replacingOccurrences(of:"plot:",with:"")) ?? 0}
+        XCTAssertTrue(NSPredicate {_ ,_ in count()>1200 && (app.staticTexts["Engine status"].value as? String ?? "").hasSuffix(",0")}.evaluate(with:nil) || XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_ ,_ in count()>1200 && (app.staticTexts["Engine status"].value as? String ?? "").hasSuffix(",0")},object:overlay)],timeout:45) == .completed,"HD graph must contain newly computed ROM points")
+        XCTAssertTrue((overlay.value as? String ?? "").contains(";axes:44"),"Axes and ticks must use the vector geometry layer")
+        let a=XCTAttachment(screenshot:app.screenshot());a.name="HD sin(x squared)";a.lifetime = .keepAlways;add(a)
+        let before=pixels(app)
+        tap(app,"F1")
+        XCTAssertEqual(count(),0,"Calculator menus must retain their original display")
+        tap(app,"ESC")
+        XCTAssertGreaterThan(count(),1200,"Closing a menu must restore the HD graph")
+        tap(app,"Configuration Settings")
+        let toggle=app.switches["HD Plotting (Prototype)"]
+        for _ in 0..<8 {if toggle.isHittable {break};app.swipeUp()}
+        XCTAssertEqual(toggle.value as? String,"1")
+        toggle.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        XCTAssertEqual(toggle.value as? String,"0","HD switch must turn off")
+        tap(app,"Done")
+        XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_ ,_ in count()==0},object:overlay)],timeout:10),.completed,"Toggle must restore original graph")
+        XCTAssertEqual(before?.subdata(in:2560..<14880),pixels(app)?.subdata(in:2560..<14880),"HD plotting must preserve original graph pixels")
+        let b=XCTAttachment(screenshot:app.screenshot());b.name="Original sin(x squared)";b.lifetime = .keepAlways;add(b)
+    }
+
+    func testHDPlotProgressesWithTwoFunctions() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-hd-plot-multiple"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:20))
+        // Observe a partial frame reliably; the separate test covers turbo.
+        tap(app,"Configuration Settings")
+        let turbo=app.switches["Overclock when Busy"]
+        if turbo.value as? String=="1" {turbo.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()}
+        XCTAssertEqual(turbo.value as? String,"0")
+        tap(app,"Done")
+        tap(app,"DIAMOND");tap(app,"F3")
+        let overlay=app.otherElements["Sharp text rendering"]
+        func count()->Int {Int((overlay.value as? String ?? "").components(separatedBy:";")[0].replacingOccurrences(of:"plot:",with:"")) ?? 0}
+        func busy()->Bool {(app.staticTexts["Engine status"].value as? String ?? "").hasSuffix(",1")}
+        XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_ ,_ in count()>10 && count()<2500 && busy()},object:overlay)],timeout:30),.completed,"Partial curves must already be HD while the calculator is busy")
+        let partial=XCTAttachment(screenshot:app.screenshot());partial.name="Progressive HD plotting";partial.lifetime = .keepAlways;add(partial)
+        XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_ ,_ in count()>2500 && !busy()},object:overlay)],timeout:60),.completed,"Both selected functions must retain their HD samples")
+        let final=XCTAttachment(screenshot:app.screenshot());final.name="Two completed HD functions";final.lifetime = .keepAlways;add(final)
+    }
+
     func testCompactYPlotRows() {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout"]

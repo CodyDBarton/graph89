@@ -151,7 +151,7 @@ final class CalculatorController: UIViewController {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             stateURL = folder.appendingPathComponent(ProcessInfo.processInfo.arguments.contains("--ui-test") ? "ui-test.state" : "titanium.state")
             let image = folder.appendingPathComponent("titanium.img")
-            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock, sharpText: settings.sharpText)
+            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock, sharpText: settings.sharpText, hdPlot: settings.hdPlot)
             let arguments = ProcessInfo.processInfo.arguments
             engine.start(os: os.path, image: image.path, state: stateURL.path,
                          fresh: arguments.contains("--fresh-session"),
@@ -209,7 +209,7 @@ final class CalculatorController: UIViewController {
         let controller = ConfigurationController(settings: settings)
         controller.onChange = { [weak self] in
             guard let self else { return }
-            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText)
+            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText, hdPlot: self.settings.hdPlot)
             self.keyHaptics.configure(duration: self.settings.hapticDuration)
             self.hdDisplay.enabled = self.settings.sharpText
             self.hdDisplay.compact = self.settings.compactLayout
@@ -227,6 +227,7 @@ final class CalculatorController: UIViewController {
             guard let self else { return }
             self.framePending = false
             guard self.running else { return }
+            self.hdDisplay.updatePlot(frame.plot,background:frame.plotBackground,decorations:frame.plotDecorations)
             self.refreshScreen(frame.pixels, retained: frame.retained)
             if ProcessInfo.processInfo.arguments.contains("--ui-test") {
                 self.engineMonitor.accessibilityValue = "\(frame.normalIterations),\(frame.turboIterations),\(frame.busy ? 1 : 0)"
@@ -297,6 +298,9 @@ final class CalculatorEngine {
     struct Frame {
         let pixels: Data
         let retained: [Int32]
+        let plot: [Float]
+        let plotBackground: Data
+        let plotDecorations:[Float]
         let on: Bool
         let busy: Bool
         let normalIterations: UInt64
@@ -327,6 +331,16 @@ final class CalculatorEngine {
                     }
                     graph89_type_text((1...12).map {"\($0)+1\n"}.joined())
                 }
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
+                    for key:Int32 in [82,6,49,56] {
+                        graph89_key(key,1);graph89_run(400_000)
+                        graph89_key(key,0);graph89_run(400_000)
+                    }
+                    graph89_type_text(ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot-multiple") ? "sin(x^2)\ncos(x)":"sin(x^2)")
+                    for _ in 0..<400 {graph89_run(50_000)}
+                    graph89_key(76,1);graph89_run(400_000)
+                    graph89_key(76,0);graph89_run(400_000)
+                }
                 if benchmark {
                     for key: Int32 in [82, 56] {
                         graph89_key(key, 1); graph89_run(400_000)
@@ -339,9 +353,10 @@ final class CalculatorEngine {
             DispatchQueue.main.async { completion(error) }
         }
     }
-    func configure(cpuPercent: Int, overclock: Bool, sharpText: Bool) {
+    func configure(cpuPercent: Int, overclock: Bool, sharpText: Bool, hdPlot: Bool) {
         queue.async {
             graph89_retained_text_enable(sharpText ? 1 : 0)
+            graph89_hd_plot_enable(hdPlot ? 1 : 0,8)
             self.cpuPercent = cpuPercent
             self.overclock = overclock
             self.restart()
@@ -415,7 +430,12 @@ final class CalculatorEngine {
             graph89_copy_screen(&bytes)
             var packets = [Int32](repeating: 0, count: 8192 * 12)
             let count = graph89_copy_retained_text(&bytes, &packets, 8192)
-            let frame = Frame(pixels: Data(bytes), retained: Array(packets.prefix(Int(count) * 12)), on: graph89_screen_is_on() != 0,
+            var plot = [Float](repeating:0,count:65540)
+            var plotBackground = [UInt8](repeating:0,count:16000)
+            let plotCount=graph89_copy_hd_plot(&bytes,&plot,65540,&plotBackground)
+            var decorations=[Float](repeating:0,count:65536)
+            let decorationCount=plotCount>0 ? graph89_copy_hd_plot_decorations(&decorations,65536):0
+            let frame = Frame(pixels: Data(bytes), retained: Array(packets.prefix(Int(count) * 12)), plot:Array(plot.prefix(Int(plotCount))),plotBackground:Data(plotBackground),plotDecorations:Array(decorations.prefix(Int(decorationCount))),on: graph89_screen_is_on() != 0,
                               busy: graph89_is_busy() != 0, normalIterations: self.normalIterations,
                               turboIterations: self.turboIterations)
             DispatchQueue.main.async { completion(frame) }
@@ -726,6 +746,9 @@ final class CalculatorSettings {
     var compactLayout: Bool {
         didSet { defaults.set(compactLayout, forKey: "compactLayout") }
     }
+    var hdPlot: Bool {
+        didSet { defaults.set(hdPlot, forKey:"hdPlot") }
+    }
     var sharpText: Bool {
         didSet { defaults.set(sharpText, forKey: "sharpText") }
     }
@@ -745,12 +768,14 @@ final class CalculatorSettings {
             defaults.removePersistentDomain(forName: "com.codybarton.graph89.settings-tests")
         }
         defaults.register(defaults: ["cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 8])
+        hdPlot = defaults.bool(forKey:"hdPlot")
         sharpText = defaults.bool(forKey: "sharpText")
         compactLayout = defaults.bool(forKey: "compactLayout") && sharpText
         cpuPercent = min(250, max(30, defaults.integer(forKey: "cpuPercent")))
         overclock = defaults.bool(forKey: "overclockWhenBusy")
         hapticDuration = min(30, max(0, defaults.integer(forKey: "hapticDuration")))
         stretchMode = StretchMode(rawValue: defaults.string(forKey: "stretchMode") ?? "") ?? .safeAspect
+        if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") { hdPlot = true }
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-sharp-text") { sharpText = true }
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-compact-layout") { sharpText = true;compactLayout = true }
     }
@@ -764,6 +789,7 @@ final class ConfigurationController: UIViewController {
     private let turboSwitch = UISwitch()
     private let sharpSwitch = UISwitch()
     private let compactSwitch = UISwitch()
+    private let plotSwitch = UISwitch()
     private let stretchButton = UIButton(type: .system)
     private let stretchDetail = UILabel()
     private let hapticSlider = UISlider()
@@ -903,6 +929,18 @@ final class ConfigurationController: UIViewController {
         compactDetail.textColor = .secondaryLabel
         compactDetail.numberOfLines = 0
         stack.addArrangedSubview(compactDetail)
+        let plotLabel = UILabel()
+        plotLabel.text = "HD Plotting (Prototype)"
+        plotLabel.font = .preferredFont(forTextStyle:.headline)
+        plotSwitch.accessibilityLabel = "HD Plotting (Prototype)"
+        plotSwitch.addTarget(self,action:#selector(plotChanged),for:.valueChanged)
+        let plotRow=UIStackView(arrangedSubviews:[plotLabel,plotSwitch]);plotRow.spacing=12
+        stack.addArrangedSubview(plotRow)
+        let plotDetail=UILabel()
+        plotDetail.text="Plot sharp axes, ticks and grid dots, with eight curve samples per original LCD column. Use F4 ReGraph after enabling. Turn off for the original graph. Other graph types and trace views use the original display."
+        plotDetail.font = .preferredFont(forTextStyle:.subheadline)
+        plotDetail.textColor = .secondaryLabel;plotDetail.numberOfLines=0
+        stack.addArrangedSubview(plotDetail)
         let reset = UIButton(type: .system)
         reset.setTitle("Restore Defaults", for: .normal)
         reset.addTarget(self, action: #selector(restoreDefaults), for: .touchUpInside)
@@ -916,6 +954,7 @@ final class ConfigurationController: UIViewController {
         turboSwitch.isOn = settings.overclock
         sharpSwitch.isOn = settings.sharpText
         compactSwitch.isOn = settings.compactLayout
+        plotSwitch.isOn = settings.hdPlot
         hapticSlider.value = Float(settings.hapticDuration)
         let hapticText = settings.hapticDuration == 0 ? "Disabled" : "\(settings.hapticDuration) ms"
         hapticValue.text = hapticText
@@ -958,7 +997,12 @@ final class ConfigurationController: UIViewController {
         updateControls()
         onChange?()
     }
+    @objc private func plotChanged() {
+        settings.hdPlot = plotSwitch.isOn
+        onChange?()
+    }
     @objc private func restoreDefaults() {
+        settings.hdPlot = false
         settings.compactLayout = false
         settings.sharpText = false
         settings.cpuPercent = 100

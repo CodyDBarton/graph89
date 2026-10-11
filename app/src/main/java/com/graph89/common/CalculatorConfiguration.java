@@ -42,6 +42,8 @@ public class CalculatorConfiguration
 	public boolean SharpText = false;
 	public static final String CompactLayoutKey = "CONF_COMPACT_LAYOUT";
 	public boolean CompactLayout = false;
+	public static final String HDPlotKey = "CONF_HD_PLOT";
+	public boolean HDPlot = false;
 
 	public boolean				ZoomMode				= true;
 	public int					ScreenScale				= -1;

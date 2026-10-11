@@ -43,6 +43,7 @@
 #include "ti68k_err.h"
 #include "mem.h"
 #include "hdtext.h"
+#include "hdplot.h"
 #include "hw.h"
 #include "hwprot.h"
 #include "bkpts.h"
@@ -69,6 +70,7 @@ extern int enable_grayscale;
 int hw_m68k_init(void)
 {
     hdtext_reset();
+    hdplot_reset();
     // init breakpoints
     ti68k_bkpt_clear_address();
 	ti68k_bkpt_clear_exception();
@@ -93,6 +95,7 @@ int hw_m68k_init(void)
 int hw_m68k_reset(void)
 {
     hdtext_reset();
+    hdplot_reset();
 	// retrieve SSP & PC values for boot
 	find_ssp_and_pc(&tihw.initial_ssp, &tihw.initial_pc);
 
@@ -107,7 +110,9 @@ int hw_m68k_reset(void)
 int hw_m68k_exit(void)
 {
     hdtext_enable(0);
+    hdplot_enable(0,8);
     hdtext_reset();
+    hdplot_reset();
     ti68k_bkpt_clear_address();
 	ti68k_bkpt_clear_exception();
 
@@ -163,6 +168,7 @@ int hw_m68k_run(int n)
 	int i;
 
     hdtext_run_begin();
+    hdplot_run_begin();
     for(i = 0; i < n; ++i)
 	{
 		uae_u32 opcode;
@@ -253,6 +259,8 @@ int hw_m68k_run(int n)
         if (graph89_instruction_trace) graph89_instruction_trace(m68k_getpc());
 #endif
 
+        if (hdplot_active && hdplot_pages[(m68k_getpc() & 0xffffff) >> 8]) hdplot_observe(m68k_getpc());
+
         if (hdtext_active && hdtext_pages[(m68k_getpc() & 0xffffff) >> 8]) hdtext_observe(m68k_getpc());
 
 		// search for next opcode and execute it
@@ -302,14 +310,14 @@ int hw_m68k_run(int n)
 	        if (regs.spcflags & SPCFLAG_BRK) 
 	        {		
 				unset_special(SPCFLAG_BRK);
-				hdtext_run_end();
+				hdplot_run_end(); hdtext_run_end();
 				return DBG_BREAK;
 	        }
 
 	        if(regs.spcflags & SPCFLAG_DBTRACE) 
 	        {
 				unset_special(SPCFLAG_DBTRACE);
-				hdtext_run_end();
+				hdplot_run_end(); hdtext_run_end();
 				return DBG_TRACE;
 	        }
 
@@ -320,6 +328,6 @@ int hw_m68k_run(int n)
 	    }
 	}
 
-    hdtext_run_end();
+    hdplot_run_end(); hdtext_run_end();
 	return 0;
 }

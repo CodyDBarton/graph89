@@ -594,7 +594,12 @@ public final class SharpTextRecognizer {
      * still match. Cursor/selection changes in blank cell padding cannot turn
      * unchanged letters back into bitmap text. No time-based stale-text hold. */
     public List<Cell> recognizeStable(boolean[] pixels, int sw, int sh, List<Cell> previous) {
-        List<Cell> fresh = recognize(pixels, sw, sh);
+        return recognizeStable(pixels,sw,sh,previous,false);
+    }
+    /** An active vector graph replaces the raster viewport; only its chrome
+     * needs fallback glyph matching. Retained drawing calls remain separate. */
+    public List<Cell> recognizeStable(boolean[] pixels,int sw,int sh,List<Cell> previous,boolean hdGraph) {
+        List<Cell> fresh = recognize(pixels, sw, sh, hdGraph);
         List<Cell> result = new ArrayList<Cell>();
         boolean[] occupied = new boolean[pixels.length];
         for (Cell cell : previous) {
@@ -647,6 +652,9 @@ public final class SharpTextRecognizer {
         return result;
     }
     public List<Cell> recognize(boolean[] pixels, int sw, int sh) {
+        return recognize(pixels,sw,sh,false);
+    }
+    private List<Cell> recognize(boolean[] pixels,int sw,int sh,boolean hdGraph) {
         if (pixels.length != sw * sh) throw new IllegalArgumentException("LCD dimensions");
         List<Run> runs = new ArrayList<Run>();
         List<Cell> singles = new ArrayList<Cell>();
@@ -656,6 +664,7 @@ public final class SharpTextRecognizer {
             int height = f == 0 ? 5 : (f == 1 ? 8 : 10);
             int maxGap = f == 0 ? 2 : (f == 1 ? 6 : 8);
             for (int y = 0; y <= sh - height; ++y) {
+                if(hdGraph && sw==160 && sh==100 && y>=16 && y+height<=93) continue;
                 Cell[] line = new Cell[sw];
                 for (int x = 0; x < sw; ++x) {
                     line[x] = match(pixels, sw, sh, f, x, y);

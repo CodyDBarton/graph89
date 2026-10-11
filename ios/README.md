@@ -3,6 +3,8 @@
 A universal, personal-use TI-89 Titanium app built from the bundled TiEmu C engine.
 The first version uses the original Titanium keyboard artwork, a monochrome LCD,
 and automatically saves/restores calculator state. It targets iOS/iPadOS 16 or later.
+The app icon uses the same Titanium artwork as Android, from
+`android/artwork/titanium-launcher.png`, resized into the iOS AppIcon asset.
 It does not yet reproduce Graph89's complete Android feature set or other calculator models.
 
 ## Open and run
@@ -217,3 +219,5 @@ Structure-specific gap caps refine the generic empty-space rule: raised powers u
 Repacking preserves the native lower scrolling boundary: newer entries lying fully below the original viewport stay below it. A dedicated fixture verifies that such rows cannot displace selected older history.
 
 Compact Y= layout also remains active when Plot1/2/3 is selected. The verified list paint pass is independent of whether the bottom equation editor is focused. Plot dialogs and other calculator screens retain their existing layout.
+
+HD Plotting is now a separate prototype setting for ordinary Titanium AMS 3.10 function graphs. It adds real ROM evaluations at eight samples per native LCD column and draws their unrounded coordinates. Axes, ticks and grid dots also render as thin device-resolution vectors; stored equations and the original LCD remain intact. Enable it and use Graph F4 ReGraph; turn it off for the original graph. Other modes/styles and trace views retain the original display. Completed HD graphs and in-flight evaluator continuations survive calculator save/restore. See [the plotting prototype](../tools/plot-trace/README.md) for scope and isolated numerical checks.
