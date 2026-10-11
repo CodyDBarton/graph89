@@ -60,7 +60,7 @@ final class SharpTextView: UIView {
                 let beyond=scene.items.filter { $0.glyph != nil && $0.scale==0.72 && $0.x>118 && $0.x<160 }.count
                 let outputIDs=Set(stride(from:0,to:retained.count,by:12).filter {retained[$0+2]==5 && retained[$0+7]==1}.map {retained[$0+3]})
                 let answerLeft=stride(from:0,to:retained.count,by:12).filter {retained[$0+2]==6 && outputIDs.contains(retained[$0+8])}.map {retained[$0]}.min() ?? -1
-                accessibilityValue="on:\(cells.count);compact:\(compact ? 1:0),input:\(scene.inputCount),full:\(scene.fullInputCount),body:\(scene.body ? 1:0),start:\(scene.inputStart),caret:\(scene.cursorX ?? -1),yeditor:\(scene.yEditor ? 1:0),extra:\(scene.extraRows),beyond:\(beyond),vsaved:\(scene.verticalSaved),edgeLabels:\(edgeLabels),answers:\(scene.alignedOutputs),answerLeft:\(answerLeft)"
+                accessibilityValue="on:\(cells.count);compact:\(compact ? 1:0),input:\(scene.inputCount),full:\(scene.fullInputCount),body:\(scene.body ? 1:0),start:\(scene.inputStart),caret:\(scene.cursorX ?? -1),yeditor:\(scene.yEditor ? 1:0),extra:\(scene.extraRows),beyond:\(beyond),vsaved:\(scene.verticalSaved),edgeLabels:\(edgeLabels),answers:\(scene.alignedOutputs),answerLeft:\(answerLeft),history:\(scene.repackedHistory ? 1:0),hentries:\(scene.visibleHistoryEntries),hsaved:\(scene.historySaved)"
             }
             let clipped=cells.filter { $0.y<$0.clipTop || $0.y+$0.glyph.height>$0.clipBottom || $0.x<$0.clipLeft || $0.x+$0.glyph.width>$0.clipRight }
             if ProcessInfo.processInfo.arguments.contains("--ui-test-clipped-math") {
@@ -134,7 +134,7 @@ final class SharpTextView: UIView {
             }
             context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor)
             context.addPath(raster);context.fillPath()
-        } else if scene.body {
+        } else if scene.body && !scene.repackedHistory {
             context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor)
             let markers=CGMutablePath()
             for x in 0..<6 {
@@ -167,7 +167,13 @@ final class SharpTextView: UIView {
             if let g=item.glyph {
                 context.translateBy(x:item.x,y:item.y);context.scaleBy(x:item.scale,y:item.scale*item.heightScale)
                 if g.character != 0,let path=outline(g) { context.addPath(path);context.fillPath() }
-                else { for y in 0..<g.height { for x in 0..<g.width where g.rows[y]&(1<<(g.width-x-1)) != 0 { context.fill(CGRect(x:x,y:y,width:1,height:1)) } } }
+                else {
+                    // Fill the complete bitmap in one pass so adjoining scaled
+                    // pixels do not acquire antialiased seams (history markers).
+                    let bitmap=CGMutablePath()
+                    for y in 0..<g.height { for x in 0..<g.width where g.rows[y]&(1<<(g.width-x-1)) != 0 { bitmap.addRect(CGRect(x:x,y:y,width:1,height:1)) } }
+                    context.addPath(bitmap);context.fillPath()
+                }
             } else if item.attribute != 0 {
                 context.setLineWidth(item.scale)
                 context.setLineCap(.square)

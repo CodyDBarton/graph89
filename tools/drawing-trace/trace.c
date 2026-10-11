@@ -249,6 +249,8 @@ int main(int argc,char **argv) {
     phase="compact-long-selected";press(TIKEY_UP);press(TIKEY_UP);snapshot(argv[2],"22-compact-long-selected");
     phase="compact-history-edit";press(TIKEY_DOWN);press(TIKEY_DOWN);press(TIKEY_CLEAR);press(TIKEY_CLEAR);text("1+x");snapshot(argv[2],"23-compact-history-edit");
     phase="y-editor";press(TIKEY_DIAMOND);press(TIKEY_F1);snapshot(argv[2],"23b-y-editor");
+    phase="y-plot-rows";for(int i=0;i<3;i++){char name[64];press(TIKEY_UP);snprintf(name,sizeof name,"23b1-y-plot-%02d",i);snapshot(argv[2],name);}
+    phase="y-plot-return";for(int i=0;i<3;i++)press(TIKEY_DOWN);snapshot(argv[2],"23b2-y-plot-return");
     phase="y-editor-input";press(TIKEY_CLEAR);text("sin(x^2)+cos(x^2)+tan(x^2)+ln(x^2)+sqrt(x^2)");snapshot(argv[2],"23c-y-editor-input");
     phase="y-editor-left-within";for(int i=0;i<5;i++)press(TIKEY_LEFT);snapshot(argv[2],"23c1-y-editor-left-within");
     phase="y-editor-left-edge";for(int i=0;i<25;i++)press(TIKEY_LEFT);snapshot(argv[2],"23c2-y-editor-left-edge");
@@ -262,6 +264,11 @@ int main(int argc,char **argv) {
     phase="compact-graph";press(TIKEY_DIAMOND);press(TIKEY_F3);run(8000000);snapshot(argv[2],"23d1-graph");
     phase="compact-window";press(TIKEY_DIAMOND);press(TIKEY_F2);snapshot(argv[2],"23d2-window");
     phase="home-return";press(TIKEY_HOME);snapshot(argv[2],"23e-home-return");
+    phase="compact-history-filled";
+    for(int i=1;i<=12;i++) {char input[32];snprintf(input,sizeof input,"%d+1",i);press(TIKEY_CLEAR);text(input);press(TIKEY_ENTER1);run(1000000);}
+    snapshot(argv[2],"25-compact-history-filled");
+    phase="compact-history-selected";press(TIKEY_UP);snapshot(argv[2],"26-compact-history-selected");
+    phase="compact-history-scrolled";for(int i=0;i<14;i++)press(TIKEY_UP);snapshot(argv[2],"27-compact-history-scrolled");press(TIKEY_ESCAPE);
     phase="compact-overflow";press(TIKEY_CLEAR);press(TIKEY_CLEAR);
     char wide[1024]={0};for(int i=0;i<80;i++)strcat(wide,"sin(x)+");strcat(wide,"x");
     text(wide);

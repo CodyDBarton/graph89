@@ -13,7 +13,7 @@ void hdtext_reset(void);
    x,y,font,ROM character,inverse,width,height,attribute,clip left,top,right,bottom (exclusive). Font 3 denotes
    a retained pretty-print shape (189 integral, 40/41 parentheses). Font 4 denotes the Home/Y= XOR cursor; inverse holds an eight-row blink mask.
    Full-content packets (Home and Y=):
-   5: expression header, code=group ID, inverse=selection, width=primitive count,
+   5: expression header, code=group ID, inverse=selection, width=primitive count, height=Home history pair ID,
       attribute=Home alignment (0 unknown, 1 calculated output, 2 entered expression).
    6: full unclipped glyph, attribute=original font, clipLeft=group ID.
    7: line/pixel, code=x1, inverse=y1, width=attribute, clipLeft=group ID.
@@ -23,6 +23,8 @@ void hdtext_reset(void);
    9: editor character, x=byte index, code=ROM character.
    10: Y= equation-list marker; compact its labels/graphics with the expression groups.
    11: glyph from the extra Y= drawing rows, attribute=original font.
+   12: Home history marker glyph, attribute=original font, clipLeft=pair ID.
+   13: completed extended Home paint pass; permits packing its retained rows.
    Groups exceeding capture capacity are omitted whole. Returns packet count. */
 /* Same export while caller holds the batch/snapshot lock. */
 int hdtext_copy_locked(const uint8_t *pixels, int32_t *packets, int capacity);

@@ -320,6 +320,13 @@ final class CalculatorEngine {
                 let restored = !fresh && FileManager.default.fileExists(atPath: state) && graph89_restore(state) == 0
                 if !restored { for _ in 0..<600 { graph89_run(50_000) } }
                 self.ready = true
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-history") {
+                    for key:Int32 in [82,56] {
+                        graph89_key(key,1);graph89_run(400_000)
+                        graph89_key(key,0);graph89_run(400_000)
+                    }
+                    graph89_type_text((1...12).map {"\($0)+1\n"}.joined())
+                }
                 if benchmark {
                     for key: Int32 in [82, 56] {
                         graph89_key(key, 1); graph89_run(400_000)

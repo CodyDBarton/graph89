@@ -77,10 +77,11 @@ final class SharpTextRecognizer {
         var selectionX:Double?=nil
     }
     struct CompactScene {
-        var body=false,input=false,yEditor=false,items:[CompactItem]=[]
+        var body=false,input=false,yEditor=false,repackedHistory=false,items:[CompactItem]=[]
         var markerOffsets=Array(repeating:0.0,count:67)
         var verticalSaved=0.0
         var alignedOutputs=0
+        var visibleHistoryEntries=0,historySaved=0.0
         var eraseRects:[[Double]]=[]
         var inverseRects:[[Double]]=[]
         var cursorX:Double?=nil
@@ -89,6 +90,47 @@ final class SharpTextRecognizer {
     // Protect complete glyph cells and diagonal/vertical graphics. Only empty
     // horizontal gutters are reduced; fraction bars follow the same coordinate
     // map as their contents. Glyph outlines and vertical layout stay unchanged.
+    // Classify only geometry that has unambiguous drawn children. Unknown
+    // constructs retain the generic gutter rule; no glyph outline is rescaled.
+    private func structureGaps(_ p:[Int32],_ members:[Int],_ start:Int,_ end:Int,_ vertical:Bool) -> [Double] {
+        var caps=Array(repeating:Double.infinity,count:max(0,end-start))
+        func limit(_ a:Int,_ b:Int,_ size:Double) {
+            for v in max(start,a)..<max(max(start,a),min(end,b)) {caps[v-start]=min(caps[v-start],size)}
+        }
+        let glyphs=members.filter {p[$0+2]==6}
+        for e in glyphs where p[e+7]==0 {
+            let bases=glyphs.filter {b in p[b+7]==1 && p[b+1]>p[e+1] && p[e+1]+p[e+6]<=p[b+1]+3 && p[e]>=p[b]+p[b+5] && p[e]-p[b]-p[b+5]<=8}
+            if let b=bases.max(by:{p[$0]+p[$0+5]<p[$1]+p[$1+5]}) {
+                if vertical {limit(Int(p[e+1]+p[e+6]),Int(p[b+1]),0.5)}
+                else {limit(Int(p[b]+p[b+5]),Int(p[e]),0.75)}
+            }
+        }
+        for line in members where p[line+2]==7 && p[line+1]==p[line+4] && abs(p[line]-p[line+3])>=5 {
+            let l=min(p[line],p[line+3]),r=max(p[line],p[line+3])+1,y=p[line+1]
+            let children=glyphs.filter {p[$0]>=l && p[$0]+p[$0+5]<=r && p[$0+7] != 3}
+            let above=children.filter {p[$0+1]+p[$0+6]<=y},below=children.filter {p[$0+1]>y}
+            guard !above.isEmpty,!below.isEmpty else {continue}
+            if vertical {
+                limit(Int(above.map {p[$0+1]+p[$0+6]}.max()!),Int(y),0.75)
+                limit(Int(y+1),Int(below.map {p[$0+1]}.min()!),0.75)
+            } else {
+                limit(Int(l+1),Int(children.map {p[$0]}.min()!),0.75)
+                limit(Int(children.map {p[$0]+p[$0+5]}.max()!),Int(r-1),0.75)
+            }
+        }
+        for integral in glyphs where p[integral+3]==189 {
+            let bodies=glyphs.filter {p[$0+7]==1 && p[$0]>=p[integral]+p[integral+5] && p[$0]-p[integral]-p[integral+5]<=12 && p[$0+1]>=p[integral+1] && p[$0+1]<p[integral+1]+p[integral+6]}
+            guard let body=bodies.min(by:{p[$0]<p[$1]}) else {continue}
+            if !vertical {limit(Int(p[integral]+p[integral+5]),Int(p[body]),1.0)}
+            else {
+                for bound in glyphs where p[bound+7]==0 && p[bound]>=p[integral]-4 && p[bound]<=p[integral]+p[integral+5]+12 {
+                    if p[bound+1]+p[bound+6]<=p[body+1] {limit(Int(p[bound+1]+p[bound+6]),Int(p[body+1]),1.0)}
+                    if p[bound+1]>=p[body+1]+p[body+6] {limit(Int(p[body+1]+p[body+6]),Int(p[bound+1]),1.0)}
+                }
+            }
+        }
+        return caps
+    }
     private func mathSpacing(_ packets:[Int32],_ members:[Int],_ left:Int,_ right:Int) -> [Double] {
         let width=right-left
         guard width>0,width<=4096 else {return []}
@@ -101,13 +143,15 @@ final class SharpTextRecognizer {
                 if kind==6 || packets[i+1] != packets[i+4] || column==begin || column==end-1 {occupied[column-left]=true}
             }
         }
+        let caps=structureGaps(packets,members,left,right,false)
         var map=Array(repeating:0.0,count:width+1),column=0,position=Double(left)
         map[0]=position
         while column<width {
             var end=column+1
             if !occupied[column] {while end<width && !occupied[end] {end += 1}}
             let length=end-column
-            let step=occupied[column] ? 1.0:max(1.0,Double(length)*0.5)/Double(length)
+            let cap=caps[column..<end].min() ?? .infinity
+            let step=occupied[column] ? 1.0:max(0.5,min(max(1.0,Double(length)*0.5),cap))/Double(length)
             while column<end {position += step;column += 1;map[column]=position}
         }
         return map
@@ -132,16 +176,66 @@ final class SharpTextRecognizer {
                 if !elastic || row<begin+2 || row>=end-2 {occupied[row-top]=true}
             }
         }
+        let caps=structureGaps(p,members,top,bottom,true)
         var map=Array(repeating:0.0,count:height+1),row=0,position=Double(top)
         map[0]=position
         while row<height {
             var end=row+1
             if !occupied[row] {while end<height && !occupied[end] {end += 1}}
             let length=end-row
-            let step=occupied[row] ? 1.0:max(0.5,Double(length)*0.5)/Double(length)
+            let cap=caps[row..<end].min() ?? .infinity
+            let step=occupied[row] ? 1.0:max(0.5,min(max(0.5,Double(length)*0.5),cap))/Double(length)
             while row<end {position += step;row += 1;map[row]=position}
         }
         return map
+    }
+    private struct HistoryGroup {
+        let group:Int32,entry:Int32,top:Double,bottom:Double
+    }
+    private struct HistoryBand {
+        var top:Double,bottom:Double,groups:[HistoryGroup]
+    }
+    // Overlapping native rows may place a short input and answer side by side.
+    // Keep those bands intact, then pack distinct bands from the viewport bottom.
+    private func historyOffsets(_ p:[Int32],_ scene:inout CompactScene) -> [Int32:Double] {
+        let records=Array(stride(from:0,to:p.count-p.count%12,by:12))
+        guard !scene.yEditor,records.contains(where:{p[$0+2]==13}) else {return [:]}
+        var groups:[HistoryGroup]=[]
+        for h in records where p[h+2]==5 {
+            guard p[h+6]>0,[1,2].contains(p[h+7]) else {return [:]}
+            let members=records.filter {(p[$0+2]==6 || p[$0+2]==7) && p[$0+8]==p[h+3]}
+            guard !members.isEmpty,members.count==Int(p[h+5]) else {return [:]}
+            let top=members.map {Int(p[$0+2]==7 ? min(p[$0+1],p[$0+4]):p[$0+1])}.min()!
+            let bottom=members.map {Int(p[$0+2]==7 ? max(p[$0+1],p[$0+4])+1:p[$0+1]+p[$0+6])}.max()!
+            if top>=83 {continue} // Preserve the native scroll boundary below the viewport.
+            let map=verticalSpacing(p,members,top,bottom)
+            let height=(map.last.map {$0-Double(top)} ?? Double(bottom-top))*0.72
+            let y=83+Double(bottom-83)*0.72
+            groups.append(HistoryGroup(group:p[h+3],entry:p[h+6],top:y-height,bottom:y))
+        }
+        guard !groups.isEmpty else {return [:]}
+        groups.sort { $0.top == $1.top ? $0.group<$1.group:$0.top<$1.top }
+        var bands:[HistoryBand]=[]
+        for g in groups {
+            if let last=bands.last,g.top<last.bottom-0.001 {
+                bands[bands.count-1].bottom=max(last.bottom,g.bottom)
+                bands[bands.count-1].groups.append(g)
+            } else {bands.append(HistoryBand(top:g.top,bottom:g.bottom,groups:[g]))}
+        }
+        var target=min(82.28,bands.last!.bottom),offsets:[Int32:Double]=[:],visible=Set<Int32>()
+        let end=target
+        for i in bands.indices.reversed() {
+            let b=bands[i],shift=target-b.bottom
+            for g in b.groups {
+                offsets[g.group]=shift
+                if g.bottom+shift>16 && g.top+shift<83 {visible.insert(g.entry)}
+            }
+            let samePair=i>0 && bands[i-1].groups.contains {a in b.groups.contains {$0.entry==a.entry}}
+            target=b.top+shift-(samePair ? 1.0:2.0)
+        }
+        scene.repackedHistory=true;scene.visibleHistoryEntries=visible.count
+        scene.historySaved=max(0,bands.last!.bottom-bands.first!.top-(end-(target+2)))
+        return offsets
     }
     private func inputAdvance(_ code:Int) -> Double {
         if code==32 {return 3.2}
@@ -156,6 +250,7 @@ final class SharpTextRecognizer {
         scene.yEditor=records.contains { packets[$0+2]==10 }
         scene.extraRows=records.filter { packets[$0+2]==11 && packets[$0]==7 && packets[$0+3]==121 }.count
         scene.body=scene.yEditor
+        let offsets=historyOffsets(packets,&scene)
         let base=scene.yEditor ? 16.0:83.0
         for header in records where packets[header+2]==5 {
             let group=packets[header+3]
@@ -191,7 +286,7 @@ final class SharpTextRecognizer {
             let yAnchor=scene.yEditor ? label.map {Double(packets[$0+1])} ?? top:bottom
             let yShift=yAnchor-packedY(yAnchor)
             scene.verticalSaved += (bottom-top-(packedY(bottom)-packedY(top)))*scale
-            func placedY(_ y:Double) -> Double {base+(packedY(y)+yShift-base)*scale}
+            func placedY(_ y:Double) -> Double {base+(packedY(y)+yShift-base)*scale+(offsets[group] ?? 0)}
             if !scene.yEditor && !output && left<40 {
                 for row in max(16,Int(top))..<max(max(16,Int(top)),min(83,Int(bottom))) {
                     scene.markerOffsets[row-16]=(packedY(Double(row))+yShift-Double(row))*scale
@@ -200,6 +295,13 @@ final class SharpTextRecognizer {
 
 
             scene.body=true
+            if scene.repackedHistory && packets[header+7]==2 {
+                for i in records where packets[i+2]==12 && packets[i+8]==packets[header+6] {
+                    if let g=compactGlyph(Int(packets[i+7]),Int(packets[i+3])) {
+                        scene.items.append(CompactItem(x:Double(packets[i])*scale,y:placedY(Double(packets[i+1])),scale:scale,inverse:false,glyph:g))
+                    }
+                }
+            }
             if inverse {
                 let top=members.map { Double($0+1<packets.count ? packets[$0+1]:0) }.min() ?? 16
                 let bottom=members.map { Double(packets[$0+2]==7 ? max(packets[$0+1],packets[$0+4])+1 : packets[$0+1]+packets[$0+6]) }.max() ?? 83

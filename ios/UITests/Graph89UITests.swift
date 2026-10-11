@@ -148,6 +148,39 @@ final class Graph89UITests: XCTestCase {
         XCTAssertTrue(selectedClip.contains("inverse:3"), "All three clipped symbols must retain inversion: \(selectedClip)")
     }
 
+    func testCompactHistoryPackingAndToggle() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout","--ui-test-history"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        let overlay=app.otherElements["Sharp text rendering"]
+        func number(_ key:String)->Double {
+            (overlay.value as? String ?? "").split(separator:",").first {$0.hasPrefix(key+":")}.flatMap {Double($0.dropFirst(key.count+1))} ?? -1
+        }
+        let filled=NSPredicate { _,_ in number("history")==1 && number("hentries")>=8 && number("hsaved")>0 }
+        expectation(for:filled,evaluatedWith:overlay);waitForExpectations(timeout:45)
+        // Wait for all twelve queued calculations, beyond the first full view.
+        Thread.sleep(forTimeInterval:5)
+        func capture(_ name:String) {let a=XCTAttachment(screenshot:app.screenshot());a.name=name;a.lifetime = .keepAlways;add(a)}
+        capture("Compact Home additional history")
+        let before=pixels(app)?.subdata(in:2560..<13280)
+        tap(app,"UP")
+        XCTAssertNotEqual(before,pixels(app)?.subdata(in:2560..<13280))
+        XCTAssertTrue(number("history")==1 && number("hentries")>=8)
+        capture("Compact Home selected history")
+        for _ in 0..<14 {tap(app,"UP")}
+        XCTAssertTrue(number("history")==1 && number("hentries")>=8)
+        capture("Compact Home scrolled history")
+        tap(app,"ESC")
+        let originalBody=pixels(app)?.subdata(in:2560..<13280)
+        tap(app,"Configuration Settings")
+        let compact=app.switches["Compact Layout (Prototype)"]
+        for _ in 0..<5 {if compact.isHittable {break};app.swipeUp()}
+        compact.tap();tap(app,"Done")
+        XCTAssertEqual(originalBody,pixels(app)?.subdata(in:2560..<13280))
+        capture("Original Home history spacing")
+    }
+
     func testCompactCalculatedOutputAlignment() {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout"]
@@ -273,6 +306,23 @@ final class Graph89UITests: XCTestCase {
         compact.tap();tap(app,"Done")
         XCTAssertEqual(before,pixels(app)?.subdata(in:2560..<13280),"Toggle must preserve the calculator equation list")
         let b=XCTAttachment(screenshot:app.screenshot());b.name="Original Y equation list";b.lifetime = .keepAlways;add(b)
+    }
+
+    func testCompactYPlotRows() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        tap(app,"HOME");tap(app,"DIAMOND");tap(app,"F1")
+        let overlay=app.otherElements["Sharp text rendering"]
+        for step in 0..<4 {
+            let value=overlay.value as? String ?? ""
+            XCTAssertTrue(value.contains("body:1") && value.contains("yeditor:1"),"Y= compact layout must remain active at plot step \(step): \(value)")
+            let a=XCTAttachment(screenshot:app.screenshot());a.name="Compact plot row \(step)";a.lifetime = .keepAlways;add(a)
+            tap(app,"UP")
+        }
+        for _ in 0..<4 {tap(app,"DOWN")}
+        XCTAssertTrue((overlay.value as? String ?? "").contains("yeditor:1"))
     }
 
     func testCompactYFillsAvailableHeight() {

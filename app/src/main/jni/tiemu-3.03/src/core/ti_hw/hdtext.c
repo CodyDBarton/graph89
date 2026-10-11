@@ -7,6 +7,7 @@
 #include "hdtext.h"
 
 #define MAX_CELLS 1024
+#define MAX_EXPRESSIONS 64
 #define MAX_SAVES 8
 #define MAX_PORTS 8
 #define LCD_PORT 0x4c00
@@ -21,11 +22,13 @@ static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static Port ports[MAX_PORTS];
 static Saved saves[MAX_SAVES];
 typedef struct { int kind,x,y,x1,y1,font,code,w,h,attr; } Primitive;
-typedef struct { uint32_t return_pc;int count,complete,alignment;Primitive items[512]; } Expression;
-static Expression expressions[16];static int expression_next,expression_active=-1;
+typedef struct { uint32_t return_pc;int count,complete,alignment,entry,selected,history;Primitive items[512]; } Expression;
+static Expression expressions[MAX_EXPRESSIONS];static int expression_next,expression_active=-1;
 static uint32_t editor,heap_slot,print_expr,clip_line,draw_pix,win_clear,te_calls[5];
 static int next_save, ready;
-static uint32_t y_list_start,y_list_finish;
+static uint32_t y_list_start,y_list_finish,home_start,home_finish,home_record;
+static int home_capture,home_complete,home_marker_count,home_entry;
+static Cell home_markers[32];static int home_marker_entries[32];
 static int y_capture,y_complete,y_extra_count;
 static Cell y_extra[128];
 static uint32_t font_slot,port_slot,font_offsets[3];
@@ -119,6 +122,21 @@ static void initialize(void) {
         }
     }
     if(y_found!=1)y_list_start=y_list_finish=0;
+    /* Home walks stored input/result records against a local vertical range.
+       Extend that range upward while keeping its bottom and LCD clip unchanged.
+       The full verified register sequence avoids fixed AMS addresses. */
+    home_start=home_finish=home_record=0;int home_found=0;
+    for(uint32_t pos=0;pos+24<tihw.rom_size;pos+=2) {
+        uint32_t a=tihw.rom_base+pos;
+        if(word_at(a)!=0x2839 || word_at(a+6)!=0x2604 || word_at(a+8)!=0xd686
+            || word_at(a+10)!=0x5383 || word_at(a+12)!=0x3879 || word_at(a+18)!=0x6000)continue;
+        for(uint32_t end=a+200;end<a+400;end+=2)
+            if(long_at(end)==0x508f4cdf && long_at(end+4)==0x3cf84e75) {
+                home_found++;home_start=a+12;home_finish=end;home_record=a+42;break;
+            }
+    }
+    if(home_found!=1)home_start=home_finish=home_record=0;
+    watch(home_start);watch(home_finish);watch(home_record);
     watch(y_list_start);watch(y_list_finish);
     watch(shape_finish);
     for(int k=0;k<3;k++)watch(shape_sites[k]);
@@ -178,6 +196,15 @@ void hdtext_observe(uint32_t pc) {
     int font=byte_at(font_slot);if(font<0 || font>2)return;
     uint32_t address=long_at(port_slot),a=m68k_areg(regs,7)+4;
     Port *p=port_for(address,1);if(!p)return;
+    if(pc==home_start) {
+        uint32_t win=m68k_areg(regs,3);
+        home_capture=win+28<tihw.ram_size && byte_at(win+16)==0 && byte_at(win+17)==16
+            && byte_at(win+18)==159 && byte_at(win+19)==82 && m68k_dreg(regs,6)==66;
+        home_complete=0;home_marker_count=0;home_entry=0;
+        if(home_capture)m68k_dreg(regs,3)+=134;
+    }
+    if(pc==home_record && home_capture)home_entry++;
+    if(pc==home_finish && home_capture){home_capture=0;home_complete=1;}
     if(pc==y_list_start) {
         uint32_t sheet=m68k_areg(regs,2),win=m68k_areg(regs,3);
         y_capture=win==sheet+0x252 && win+28<tihw.ram_size && byte_at(win+16)==0 && byte_at(win+17)==16 && byte_at(win+18)==159 && byte_at(win+19)==82;
@@ -198,13 +225,13 @@ void hdtext_observe(uint32_t pc) {
         /* Preserve entry/status/toolbar clears; a body clear or dialog must
            invalidate compact history so it cannot paint over the new window. */
         if(win<tihw.ram_size && win+28<tihw.ram_size && byte_at(win+17)<83 && byte_at(win+19)>=16) {
-            memset(expressions,0,sizeof(expressions));expression_active=-1;expression_next=0;y_complete=0;y_extra_count=0;
+            memset(expressions,0,sizeof(expressions));expression_active=-1;expression_next=0;y_complete=0;y_extra_count=0;home_complete=0;home_marker_count=0;
         }
     }
     if(pc==print_expr && expression_active<0) {
         uint32_t win=long_at(a+4);
         if(win+28<tihw.ram_size && byte_at(win+17)==16 && byte_at(win+16)==0 && byte_at(win+18)==159) {
-            int slot=expression_next++%16;Expression *e=&expressions[slot];memset(e,0,sizeof *e);
+            int slot=expression_next++%MAX_EXPRESSIONS;Expression *e=&expressions[slot];memset(e,0,sizeof *e);
             e->return_pc=long_at(a-4);watch(e->return_pc);expression_active=slot;
             /* AMS Home passes its input/result flag to Parse2DMultiExpr immediately
                before Print2DExpr. Verify the caller instructions before reading
@@ -216,6 +243,10 @@ void hdtext_observe(uint32_t pc) {
                 && word_at(call+16)==0x2f08 && word_at(call+18)==0x4eb9
                 && long_at(call+20)==print_expr && word_at(a+12)<=1)
                 e->alignment=word_at(a+12)==0?1:2;
+            if(e->alignment && home_capture) {
+                e->entry=home_entry;
+                e->selected=word_at(m68k_areg(regs,6)+14)!=0;e->history=1;
+            }
         }
     }
     if(pc==clip_line && expression_active>=0) {
@@ -254,6 +285,9 @@ void hdtext_observe(uint32_t pc) {
         }
         remember_primitive((Primitive){.x=c.x+(c.font<2),.y=c.y,.font=c.font,.code=c.code,.w=c.w,.h=c.h,.attr=c.attr});
         if(y_capture && expression_active<0 && address==tihw.lcd_adr && c.y+c.h>83 && y_extra_count<128)y_extra[y_extra_count++]=c;
+        if(home_capture && expression_active<0 && address==tihw.lcd_adr && c.x<6 && c.code==16 && home_marker_count<32) {
+            home_markers[home_marker_count]=c;home_marker_entries[home_marker_count++]=home_entry;
+        }
         insert(p,c);
     } else if(pc==draw_str) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+8);uint32_t s=long_at(a+4);
@@ -295,12 +329,12 @@ void hdtext_run_begin(void) { pthread_mutex_lock(&lock);if(hdtext_active)initial
 void hdtext_run_end(void) { pthread_mutex_unlock(&lock); }
 void hdtext_enable(int enabled) {
     pthread_mutex_lock(&lock);
-    if(hdtext_active!=(enabled!=0)){memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));editor=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));}
+    if(hdtext_active!=(enabled!=0)){memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));editor=0;home_capture=home_complete=home_marker_count=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));}
     hdtext_active=enabled!=0;pthread_mutex_unlock(&lock);
 }
 void hdtext_reset(void) {
     pthread_mutex_lock(&lock);ready=0;font_slot=port_slot=window_slot=shape_finish=0;memset(shape_sites,0,sizeof(shape_sites));memset(font_offsets,0,sizeof(font_offsets));
-    editor=heap_slot=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));
+    home_start=home_finish=home_record=0;home_capture=home_complete=home_marker_count=0;editor=heap_slot=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));
     memset(hdtext_pages,0,sizeof(hdtext_pages));memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));next_save=0;
     pthread_mutex_unlock(&lock);
 }
@@ -430,8 +464,11 @@ int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
         }
         /* An oversize live expression must keep the entire original body:
            drawing only its smaller neighbours would hide visible content. */
-        int body_complete=editor_complete;
-        for(int k=0;k<16;k++)if(expressions[k].complete<0) {
+        /* Plot rows unfocus the equation editor, but the verified Y= paint
+           pass still contains the complete list. Its layout must not depend
+           on whether the bottom equation input currently accepts typing. */
+        int body_complete=editor_complete || (screen==2 && y_complete);
+        for(int k=0;k<MAX_EXPRESSIONS;k++)if(expressions[k].complete<0) {
             Expression *e=&expressions[k];
             for(int j=0;j<e->count;j++)if(!e->items[j].kind) {
                 Primitive q=e->items[j];Cell c={q.x-(q.font<2),q.y,q.font,q.code,q.attr,0,16,160,83,q.w,q.h,0};
@@ -445,16 +482,39 @@ int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
             Cell c=y_extra[i];int32_t v[12]={c.x+(c.font<2),c.y,11,c.code,0,c.w,c.h,c.font,0,16,160,110};
             memcpy(out+count++*12,v,sizeof v);
         }
-        for(int k=0;k<16 && body_complete;k++) {
+        int home_valid=0;
+        if(screen==1 && home_complete)for(int k=0;k<MAX_EXPRESSIONS;k++) {
+            Expression *e=&expressions[k];if(!e->history || e->complete!=1)continue;
+            for(int j=0;j<e->count;j++)if(!e->items[j].kind) {
+                Primitive q=e->items[j];Cell c={q.x-(q.font<2),q.y,q.font,q.code,q.attr,0,16,160,83,q.w,q.h,0};
+                if(matches(c,pixels,0) || matches(c,pixels,1)){home_valid=1;break;}
+            }
+        }
+        if(home_valid) {
+            int required=1+home_marker_count;
+            for(int k=0;k<MAX_EXPRESSIONS;k++)if(expressions[k].history) {
+                if(expressions[k].complete!=1){body_complete=0;break;}
+                required+=expressions[k].count+1;
+            }
+            if(count+required>capacity)body_complete=0;
+        }
+        if(home_valid && body_complete && count<capacity) {
+            int32_t v[12]={0,16,13,0,0,160,67,0,0,16,160,83};memcpy(out+count++*12,v,sizeof v);
+            for(int i=0;i<home_marker_count && count<capacity;i++) {
+                Cell c=home_markers[i];int32_t marker[12]={c.x+(c.font<2),c.y,12,c.code,0,c.w,c.h,c.font,home_marker_entries[i],16,160,83};
+                memcpy(out+count++*12,marker,sizeof marker);
+            }
+        }
+        for(int k=0;k<MAX_EXPRESSIONS && body_complete;k++) {
             Expression *e=&expressions[k];if(e->complete!=1 || !e->count || count+e->count+1>capacity)continue;
             int inv=0,matched=0;
             for(int j=0;j<e->count;j++)if(e->items[j].kind==0) {
                 Primitive q=e->items[j];Cell c={q.x-(q.font<2),q.y,q.font,q.code,q.attr,0,16,160,83,q.w,q.h,0};
                 if(matches(c,pixels,0)){matched++;}else if(matches(c,pixels,1)){inv++;matched++;}
             }
-            if(!matched && !(screen==2 && y_complete))continue; /* Completed Y= paint passes include deliberately clipped extra rows. */
-            inv=inv*2>matched;
-            int32_t header[12]={0,0,5,k,inv,e->count,0,e->alignment,0,16,160,83};memcpy(out+count++*12,header,sizeof header);
+            if(!matched && !(screen==2 && y_complete) && !(home_valid && e->history))continue; /* Completed Y= paint passes include deliberately clipped extra rows. */
+            inv=matched ? inv*2>matched:e->selected;
+            int32_t header[12]={0,0,5,k,inv,e->count,e->history?e->entry:0,e->alignment,0,16,160,83};memcpy(out+count++*12,header,sizeof header);
             for(int j=0;j<e->count;j++) {
                 Primitive q=e->items[j];int32_t v[12]={q.x,q.y,q.kind?7:6,q.kind?q.x1:q.code,q.kind?q.y1:inv,q.kind?q.attr:q.w,q.h,q.font,k,16,160,83};
                 memcpy(out+count++*12,v,sizeof v);

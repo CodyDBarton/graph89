@@ -151,7 +151,7 @@ final class SharpTextRenderer {
                 raster.addRect(left*0.72f,16+(y-16)*0.72f,x*0.72f,16+(y-15)*0.72f,Path.Direction.CW);
             }
             background.setColor(on);canvas.drawPath(raster,background);
-        }else if(scene.body) {
+        }else if(scene.body && !scene.repackedHistory) {
             background.setColor(on);
             for(int x=0;x<6;x++)for(int y=16;y<83;) {
                 if(!pixels[y*160+x]){y++;continue;}
@@ -175,7 +175,11 @@ final class SharpTextRenderer {
             if(item.glyph!=null) {
                 SharpTextRecognizer.Glyph g=item.glyph;canvas.translate((float)item.x,(float)item.y);canvas.scale((float)item.scale,(float)(item.scale*item.heightScale));
                 if(g.character!=0)canvas.drawPath(outline(g),ink);
-                else for(int y=0;y<g.height;y++)for(int x=0;x<g.width;x++)if((g.rows[y]&(1<<(g.width-x-1)))!=0)canvas.drawRect(x,y,x+1,y+1,ink);
+                else {
+                    Path bitmap=new Path();
+                    for(int y=0;y<g.height;y++)for(int x=0;x<g.width;x++)if((g.rows[y]&(1<<(g.width-x-1)))!=0)bitmap.addRect(x,y,x+1,y+1,Path.Direction.CW);
+                    canvas.drawPath(bitmap,ink);
+                }
             }else if(item.attribute!=0) {
                 ink.setStrokeWidth((float)item.scale);ink.setStrokeCap(Paint.Cap.SQUARE);
                 canvas.drawLine((float)(item.x+item.scale/2),(float)(item.y+item.scale/2),(float)(item.x1+item.scale/2),(float)(item.y1+item.scale/2),ink);

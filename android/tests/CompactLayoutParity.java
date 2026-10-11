@@ -11,7 +11,7 @@ public final class CompactLayoutParity {
             SharpTextRecognizer.CompactScene scene=r.compactScene(packets);
             List<String> items=new ArrayList<String>();
             long rectHeight=0,markerOffset=0;for(double[] rect:scene.inverseRects)rectHeight+=Math.round(rect[3]*1000);for(double offset:scene.markerOffsets)markerOffset+=Math.round(offset*1000);
-            items.add((scene.body?1:0)+","+(scene.input?1:0)+","+scene.inputStart+","+scene.inputCount+","+scene.fullInputCount+","+(scene.cursorX==null?-1:Math.round(scene.cursorX*1000))+","+scene.inverseRects.size()+","+rectHeight+","+markerOffset+","+Math.round(scene.verticalSaved*1000));
+            items.add((scene.body?1:0)+","+(scene.input?1:0)+","+scene.inputStart+","+scene.inputCount+","+scene.fullInputCount+","+(scene.cursorX==null?-1:Math.round(scene.cursorX*1000))+","+scene.inverseRects.size()+","+rectHeight+","+markerOffset+","+Math.round(scene.verticalSaved*1000)+","+(scene.repackedHistory?1:0)+","+scene.visibleHistoryEntries+","+Math.round(scene.historySaved*1000));
             for(SharpTextRecognizer.CompactItem item:scene.items) {
                 SharpTextRecognizer.Glyph g=item.glyph;
                 items.add(Math.round(item.x*1000)+","+Math.round(item.y*1000)+","+Math.round(item.scale*1000)+","+(item.inverse?1:0)+","+(g==null?-1:(int)g.character)+","+(g==null?Math.round(item.x1*1000):g.width)+","+(g==null?Math.round(item.y1*1000):g.height)+","+Math.round(item.advance*1000)+","+(item.selectionX==null?-1:Math.round(item.selectionX*1000))+","+Math.round(item.heightScale*1000));
