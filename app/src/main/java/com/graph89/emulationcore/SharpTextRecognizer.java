@@ -602,6 +602,10 @@ public final class SharpTextRecognizer {
         List<Cell> fresh = recognize(pixels, sw, sh, hdGraph);
         List<Cell> result = new ArrayList<Cell>();
         boolean[] occupied = new boolean[pixels.length];
+        // A validated toolbar arrow takes priority over cached lookalike fragments.
+        for (Cell cell : fresh) if (cell.glyph.character == TOOLBAR_DROPDOWN) {
+            occupy(cell, occupied, sw); result.add(cell);
+        }
         for (Cell cell : previous) {
             // The Home editor has a fixed font/grid. Reacquire it from that
             // grid each frame instead of preserving an off-grid fragment.
@@ -714,6 +718,8 @@ public final class SharpTextRecognizer {
         });
         boolean[] occupied = disabledToolbar.clone();
         List<Cell> result = new ArrayList<Cell>();
+        // Reserve arrows before generic runs can match a symbol inside their pixels.
+        addToolbarDropdowns(pixels, sw, sh, occupied, result);
         inputBaseline = home && !graph && homeInputBorders(pixels, sw, sh) ? sh - 15 : -1;
         if (inputBaseline >= 0) {
             // Unlike pretty print, the input editor is one eight-row medium
@@ -752,7 +758,6 @@ public final class SharpTextRecognizer {
             occupy(c, occupied, sw); result.add(c);
         }
         if (home && !graph) addMathDelimiters(pixels, sw, sh, occupied, result);
-        addToolbarDropdowns(pixels, sw, sh, occupied, result);
         return result;
     }
 
@@ -790,20 +795,22 @@ public final class SharpTextRecognizer {
         boolean[] occupied, List<Cell> result) {
         if (sh < 16) return;
         for (int x = 0; x < sw; ++x) if (!pixels[15 * sw + x]) return;
-        List<Cell> arrows = new ArrayList<Cell>();
-        for (Cell f : result) {
-            if (f.glyph.font != 0 || f.glyph.character != 'F' || f.y != 2) continue;
-            for (Cell n : result) {
-                if (n.glyph.font != 0 || n.glyph.character < '1' || n.glyph.character > '8'
-                    || n.y != f.y || n.x != f.x + f.glyph.width || n.inverse != f.inverse) continue;
-                Cell arrow = new Cell(n.x + n.glyph.width, f.y + 2, f.inverse, dropdown);
-                if (arrow.x + 3 <= sw && !overlaps(arrow, occupied, sw)
-                    && !overlaps(arrow, disabledToolbar, sw) && exact(arrow, pixels, sw)) {
-                    occupy(arrow, occupied, sw); arrows.add(arrow);
+        Glyph f = toolbarLabels.get('F');
+        if (f == null) return;
+        for (int x = 0; x + f.width < sw; ++x) for (int polarity = 0; polarity < 2; ++polarity) {
+            boolean inverse = polarity != 0;
+            if (!exact(new Cell(x, 2, inverse, f), pixels, sw)) continue;
+            for (char digit = '1'; digit <= '8'; ++digit) {
+                Glyph n = toolbarLabels.get(digit);
+                if (n == null || x + f.width + n.width + 3 > sw
+                    || !exact(new Cell(x + f.width, 2, inverse, n), pixels, sw)) continue;
+                Cell arrow = new Cell(x + f.width + n.width, 4, inverse, dropdown);
+                if (!overlaps(arrow, occupied, sw) && !overlaps(arrow, disabledToolbar, sw)
+                    && exact(arrow, pixels, sw)) {
+                    occupy(arrow, occupied, sw); result.add(arrow);
                 }
             }
         }
-        result.addAll(arrows);
     }
 
     private void addMathIntegrals(boolean[] pixels, int sw, int sh, boolean[] occupied,

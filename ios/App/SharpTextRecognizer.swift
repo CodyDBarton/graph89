@@ -586,6 +586,8 @@ final class SharpTextRecognizer {
         home = home || (tools && prgm && homeBorders(p,sw,sh)); self.graph=graph; homeFrame=home; framePixels=sw==160 && sh==100 ? p:[]
         runs.sort { $0.font != $1.font ? $0.font>$1.font : $0.ink>$1.ink }
         var occupied=blocked, result:[Cell]=[]
+        // Reserve arrows before generic runs can match a symbol inside their pixels.
+        dropdowns(p,sw,sh,&occupied,&result)
         input = home && !graph && homeBorders(p,sw,sh) ? sh-15 : -1
         if input>=0 {
             for x in stride(from:1,to:sw,by:6) { if let c=match(p,sw,sh,1,x,input), c.glyph.width==6 && c.glyph.character != 0 { result.append(c) } }
@@ -613,11 +615,12 @@ final class SharpTextRecognizer {
             }
             parentheses(p,sw,sh,&occupied,&result)
         }
-        dropdowns(p,sw,sh,&occupied,&result)
         return result
     }
     func stable(_ p: [Bool], _ previous: [Cell], _ sw: Int=160, _ sh: Int=100) -> [Cell] {
         let fresh=recognize(p,sw,sh); var result:[Cell]=[], occupied=Array(repeating:false,count:p.count)
+        // A validated toolbar arrow takes priority over cached lookalike fragments.
+        for c in fresh where c.glyph.character==Self.dropdown { occupy(c,&occupied,sw); result.append(c) }
         for c in previous {
             let g=c.glyph
             if input>=0 && c.y<input+8 && c.y+g.height>input { continue }
@@ -680,12 +683,15 @@ final class SharpTextRecognizer {
     }
     private func dropdowns(_ p: [Bool], _ sw: Int, _ sh: Int, _ occupied: inout [Bool], _ out: inout [Cell]) {
         if sh<16 || !(0..<sw).allSatisfy({p[15*sw+$0]}) { return }
-        var arrows:[Cell]=[]
-        for f in out where f.glyph.font==0 && f.glyph.character==70 && f.y==2 {
-            for n in out where n.glyph.font==0 && (49...56).contains(n.glyph.character) && n.y==f.y && n.x==f.x+f.glyph.width && n.inverse==f.inverse {
-                let c=Cell(x:n.x+n.glyph.width,y:f.y+2,inverse:f.inverse,glyph:arrow)
-                if c.x+3<=sw && !overlaps(c,occupied,sw) && !overlaps(c,blocked,sw) && exact(c,p,sw) { occupy(c,&occupied,sw); arrows.append(c) }
+        guard let f=labels[70] else { return }
+        for x in 0..<sw-f.width { for inv in [false,true] {
+            if !exact(Cell(x:x,y:2,inverse:inv,glyph:f),p,sw) { continue }
+            for digit in 49...56 {
+                guard let n=labels[digit], x+f.width+n.width+3<=sw,
+                    exact(Cell(x:x+f.width,y:2,inverse:inv,glyph:n),p,sw) else { continue }
+                let c=Cell(x:x+f.width+n.width,y:4,inverse:inv,glyph:arrow)
+                if !overlaps(c,occupied,sw) && !overlaps(c,blocked,sw) && exact(c,p,sw) { occupy(c,&occupied,sw); out.append(c) }
             }
-        }; out.append(contentsOf:arrows)
+        } }
     }
 }

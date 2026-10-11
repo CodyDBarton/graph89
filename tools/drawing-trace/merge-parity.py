@@ -23,6 +23,14 @@ assert len(a)==len(bases)>0
 print(f'{len(a)} captured frames: retained identities and fallback merge identical on Android/iOS.')
 
 by_name={Path(base).name:row for base,row in zip(bases,a)}
+# The Graph F6 arrow shares pixels with a small-font special symbol. Check
+# the actual retained/fallback merge, not only an isolated synthetic triangle.
+if '23d1-graph' in by_name:
+    rows=[list(map(int,c.split(','))) for c in by_name['23d1-graph'].split(';') if c]
+    for x in [14,34,105,125,142]:
+        assert any(c[0]==x and c[1]==4 and c[3]==57856 for c in rows),('Graph dropdown',x)
+        assert not any(c[3]!=57856 and c[0]<x+3 and c[0]+c[5]>x and c[1]<6 and c[1]+c[6]>4 for c in rows),('Graph arrow lookalike',x)
+    print('Actual-ROM Graph dropdowns, including F6, reject overlapping symbol fragments.')
 required={
     '15-tall-integral-pretty': [(57789,0,25),(40,0,25),(41,0,25)],
     '15b-tall-integral-selected': [(57789,1,25),(40,1,25),(41,1,25)],

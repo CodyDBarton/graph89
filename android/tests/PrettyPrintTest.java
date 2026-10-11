@@ -212,6 +212,10 @@ public final class PrettyPrintTest {
         p[2*W+29]=false;cs=r.recognizeStable(p,W,H,previous);
         check(has(cs,'a',3,8),"Enabled tile remains sharp beside disabled tile");
         for(SharpTextRecognizer.Cell c:cs)check(c.x<=25||c.x>=50||c.y>=15,"Disabled tile rejects fresh and cached fragments");
+        // A small special glyph can match the rightmost pixel of a dropdown.
+        // F6 on the actual Graph toolbar previously selected this lookalike first.
+        font(0,(char)183,2,new int[]{0,0,2,0,0});
+        r=new SharpTextRecognizer(FONTS);
         // The approved triangle replaces only an exact dropdown beside F#.
         p=new boolean[W*H];for(int x=0;x<W;++x)p[15*W+x]=true;
         for(int y=3;y<15;++y){p[y*W]=true;p[y*W+25]=true;}
@@ -219,6 +223,7 @@ public final class PrettyPrintTest {
         draw(p,12,4,3,new int[]{7,2});
         cs=r.recognize(p,W,H);
         check(has(cs,SharpTextRecognizer.TOOLBAR_DROPDOWN,12,4),"Dropdown beside intact F1");
+        check(!has(cs,SharpTextRecognizer.specialCharacter(183),14,2),"Dropdown rejects lookalike special fragment");
         previous=cs;p[5*W+13]=false;
         check(!has(r.recognizeStable(p,W,H,previous),SharpTextRecognizer.TOOLBAR_DROPDOWN,12,4),"Changed arrow loses cached overlay");
         draw(p,12,4,3,new int[]{7,2});previous=r.recognize(p,W,H);
