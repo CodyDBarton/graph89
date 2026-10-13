@@ -101,7 +101,7 @@ int main(int argc,char **argv){
   snprintf(path,sizeof path,"%s/reheld.txt",argv[2]);log=fopen(path,"w");
   for(int frame=0;frame<80;frame++){graph89_cursor_test_time=20+frame*0.01;run(50000);fprintf(log,"%d %d %d\n",frame,steps,hdplot_trace_multiplier());}
   fclose(log);graph89_key(TIKEY_LEFT,0);measuring=0;run(400000);
-  press(TIKEY_DIAMOND);press(TIKEY_F1);graph89_key(TIKEY_DOWN,1);fprintf(scope,"y %d\n",hdplot_trace_multiplier());run(10000000);graph89_key(TIKEY_DOWN,0);run(400000);snapshot(argv[2],"y-held");fclose(scope);
+  press(TIKEY_DIAMOND);press(TIKEY_F1);graph89_cursor_test_time=30;graph89_key(TIKEY_DOWN,1);graph89_cursor_test_time=30.35;fprintf(scope,"y %d\n",hdplot_trace_multiplier());run(10000000);graph89_key(TIKEY_DOWN,0);run(400000);snapshot(argv[2],"y-held");fclose(scope);
   graph89_stop();return 0;
  }
 

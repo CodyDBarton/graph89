@@ -24,6 +24,7 @@ int hdplot_copy(const uint8_t *pixels,float *points,int capacity,uint8_t *backgr
    A zero-length segment is a grid dot. NaN,kind,x,y denotes a live
    navigation overlay: kind -1 is the verified circle/cross cursor centre, -2 its blink-off phase;
    Kinds -3/-4 are the 21x21 held-arrow cursor visible/hidden phases.
+   Kinds -5/-6 are graph point circles/squares; -7,5,0 marks a 3D scene.
    ASCII 48..57 is a 6x8 plot-number cell using the approved sharp font. Query only after a valid plot copy. */
 int hdplot_copy_decorations(float *segments,int capacity);
 #endif

@@ -44,15 +44,28 @@ final class SharpTextView: UIView {
         guard data.count==160*100 else { cells=[]; setNeedsDisplay(); return }
         original=data; pixels=SharpTextRecognizer.withoutCursor(data.map {$0==30},retained); recognize(); setNeedsDisplay()
     }
+    private func sameGeometry(_ lhs:[Float],_ rhs:[Float])->Bool {
+        lhs.count==rhs.count && zip(lhs,rhs).allSatisfy { $0.0 == $0.1 || ($0.0.isNaN && $0.1.isNaN) }
+    }
     func updatePlot(_ next:[Float],background:Data,decorations:[Float]) {
-        if next==plot && background==plotBackground && decorations==plotDecorations {return}
+        if sameGeometry(next,plot) && background==plotBackground && sameGeometry(decorations,plotDecorations) {return}
         plot=next;plotBackground=background;plotDecorations=decorations;setNeedsDisplay()
         if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
             accessibilityIdentifier="Sharp text rendering"
-            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"
+            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"+readoutDiagnostics
         }
     }
-    private var vectorCursorCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && plotDecorations[$0+1] <= -1}.count}
+    private var readoutDiagnostics:String {
+        let readouts=cells.filter { (0...2).contains($0.glyph.font) && $0.y>=70 && $0.y<93 }
+        let complete=plotBackground.count==16000 && readouts.allSatisfy { c in
+            let left=max(0,c.clipLeft,c.x),right=min(159,c.clipRight,c.x+c.glyph.width)
+            let top=max(16,c.clipTop,c.y),bottom=min(93,c.clipBottom,c.y+c.glyph.height)
+            guard left<right,top<bottom else {return false}
+            return (top..<bottom).allSatisfy {y in (left..<right).allSatisfy {x in plotBackground[y*160+x]&2 != 0}}
+        }
+        return ";readouts:\(readouts.count);theta:\(readouts.filter {$0.glyph.character==SharpTextRecognizer.special(136)}.count);readoutsComplete:\(complete ? 1:0);thetaCursor:\(readouts.filter {$0.glyph.character==SharpTextRecognizer.special(136) && nativeCursor($0)}.count)"
+    }
+    private var vectorCursorCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && plotDecorations[$0+1] >= -4 && plotDecorations[$0+1] <= -1}.count}
     private var plotNumberCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && plotDecorations[$0+1]>=48}.count}
     private func drawPlot(_ context:CGContext) {
         guard plot.count>6,plotBackground.count==16000 else {return}
@@ -79,18 +92,27 @@ final class SharpTextView: UIView {
         context.setLineWidth(240/(bounds.width*contentScaleFactor));context.setLineCap(.round)
         let geometry=CGMutablePath()
         for i in stride(from:0,to:plotDecorations.count,by:4) {
-            if plotDecorations[i].isNaN {continue}
+            if plotDecorations[i].isNaN {
+                let kind=plotDecorations[i+1],x=CGFloat(plotDecorations[i+2]),y=CGFloat(plotDecorations[i+3])
+                if kind == -5 || kind == -6 {
+                    context.setFillColor(UIColor(white:30/255.0,alpha:1).cgColor)
+                    if kind == -6 {context.fill(CGRect(x:x-1.5,y:y-1.5,width:3,height:3))}
+                    else {context.fillEllipse(in:CGRect(x:x-1,y:y-1,width:2,height:2))}
+                }
+                continue
+            }
             let p=CGPoint(x:CGFloat(plotDecorations[i]),y:CGFloat(plotDecorations[i+1]))
             let q=CGPoint(x:CGFloat(plotDecorations[i+2]),y:CGFloat(plotDecorations[i+3]))
             if p==q {let radius=120/(bounds.width*contentScaleFactor);context.fillEllipse(in:CGRect(x:p.x-radius,y:p.y-radius,width:2*radius,height:2*radius))}
             else {geometry.move(to:p);geometry.addLine(to:q)}
         }
         context.addPath(geometry);context.strokePath()
+        let surface=stride(from:0,to:plotDecorations.count,by:4).contains {plotDecorations[$0].isNaN && plotDecorations[$0+1] == -7 && plotDecorations[$0+2] == 5}
         let path=CGMutablePath();var previous:CGPoint?
         for i in stride(from:4,to:plot.count-1,by:2) {
             let point=CGPoint(x:CGFloat(plot[i])+0.5,y:CGFloat(plot[i+1])+0.5)
             guard point.x.isFinite,point.y.isFinite else {previous=nil;continue}
-            if let p=previous, !((p.y<16 && point.y>93)||(p.y>93 && point.y<16)) {
+            if let p=previous, surface || !((p.y<16 && point.y>93)||(p.y>93 && point.y<16)) {
                 // Clip before building the graphics path. Values near poles can
                 // be enormous; they must never reach the device rasterizer.
                 let dx=point.x-p.x,dy=point.y-p.y
@@ -144,7 +166,7 @@ final class SharpTextView: UIView {
         context.restoreGState()
     }
     private func recognize() {
-        if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {accessibilityIdentifier="Sharp text rendering";accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)";if !enabled {cells=[];fallback=[];return}}
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {accessibilityIdentifier="Sharp text rendering";accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"+readoutDiagnostics;if !enabled {cells=[];fallback=[];return}}
         guard enabled, font != nil, pixels.count==160*100, let recognizer else { cells=[]; fallback=[]; accessibilityHint="retained:0"; accessibilityValue = "off:0"; return }
         fallback=recognizer.stable(pixels,fallback)
         cells=recognizer.retained(retained,fallback:fallback)
@@ -179,7 +201,7 @@ final class SharpTextView: UIView {
         // are enabled, instead of briefly replacing it with the text counter.
         if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
             accessibilityIdentifier="Sharp text rendering"
-            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"
+            accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"+readoutDiagnostics
         }
     }
     private func glyphPath(_ code:Int,_ face:CTFont)->CGPath? {

@@ -1,8 +1,16 @@
-# True HD function plotting prototype
+# True HD plotting prototype
 
-The Android and iOS settings now include **HD Plotting (Prototype)**, independent of Sharp Text and Compact Layout. Enable it, open Graph, and press F4 ReGraph. Turning it off immediately reveals the original calculator graph. Android requires Solid LCD with grayscale disabled. The initial implementation supports full-screen TI-89 Titanium AMS 3.10 `y=f(x)` graphs in the default connected-line style. Other styles, graph modes, split-screen layouts and unverified ROMs retain the original display. Cursor movement, Trace and native graph popup menus preserve the HD scene beneath their calculator-owned overlays.
+The Android and iOS settings now include **HD Plotting (Prototype)**, independent of Sharp Text and Compact Layout. Enable it, open Graph, and press F4 ReGraph. Turning it off immediately reveals the original calculator graph. Android requires Solid LCD with grayscale disabled. Supports all six full-screen TI-89 Titanium AMS 3.10 graph modes: Function, Parametric, Polar, Sequence, 3D wireframe and Differential Equations. Non-default curve styles, other 3D styles (hidden surface, contour and implicit), split-screen layouts and unverified ROMs retain the original display. Cursor movement, Trace and native graph popup menus preserve the HD scene beneath their calculator-owned overlays.
 
 This actually evaluates additional points through AMS's `cpt_gr_fun` routine. It is not raster smoothing, spline fitting, a host equation parser, or a reimplementation of TI mathematics. The calculator's angle mode, variables, selected functions and window ranges continue to determine the results. With xres=1, seven additional x values between each adjacent original pair produce 1,265 samples over the 158 native horizontal intervals, versus 159 primary original samples. The ROM's existing adaptive checks are additional to these counts. Larger xres intervals receive more subdivisions to maintain eight samples per native column.
+
+Parametric and polar curves replay `cpt_gr_param` / `cpt_gr_polar` at extra t/theta values. Both output coordinates come from the calculator's evaluator; angle mode and undefined-result handling remain calculator owned. Subdivision targets eight evaluations per 1/158 of the parameter range, capped at 160 subdivisions per original interval.
+
+Sequence graphs retain integer n: inventing fractional sequence terms would change the mathematics. Their unrounded `GrLineFlt` coordinates produce sharp connected segments or native-style dot/square markers.
+
+3D wireframes temporarily increase xgrid/ygrid by the HD factor, capped at 63 to stay within the native heap-block and host geometry limits. Native vertices and edge connectivity remain calculator owned. A verified Q14 projection loop supplies matrix, scale and centre before raster rounding. The default mesh increases from 225 vertices / 420 edges to 3,969 vertices / 7,812 edges. The HD mesh is published before native raster line drawing; its background excludes transient progress text. Rotation reprojects the native mesh. Optional 3D axes/box edges are captured as vector lines at native endpoint positions; labels are retained from the separate backing-bitmap passes. Original window grid settings are restored after completion or interruption.
+
+Differential equations use the native solver and `GrLineFlt` output. During a graph calculation, tstep and Euler step are divided by the HD factor, RK tolerance by its square (never raising an already tighter tolerance), and slope-field resolution is doubled, capped at 63. Slope vectors are captured from native floating-point deltas before endpoint rounding. Original tstep, tolerance, Euler step and field resolution are restored at the graph return. No host ODE parser or solver is used.
 
 Two unique caller instruction fingerprints identify the primary endpoint evaluations. Their original arguments, 68000 registers, condition flags and x value are retained. Each added call runs normal ROM code, then the original call runs with its original arguments. Re-entering the routine refreshes the CPU prefetch. Only validated RAM buffers are used, capture is bounded to 32,768 points, and interpolation/replay is limited to 160 subdivisions per primary interval. Unknown caller layouts are untouched. The ROM file and stored equations are unchanged.
 
@@ -33,7 +41,7 @@ The iOS `testHDPlotEvaluatesAdditionalPointsAndToggle` test also checks actual i
 
 SDK reference used to identify routines and guest types: [GCC4TI unknown.h](https://debrouxl.github.io/gcc4ti/unknown.html), particularly `cpt_gr_fun`, `execute_graph_func`, `GR_WIN_VARS`, `XCvtPtoF`, and `YCvtFtoP`. The SDK marks several internals as undocumented; caller signatures and state behavior were therefore verified against the local ROM.
 
-Graph-format regression fixtures set the documented `GR_MODES` flags only in isolated test RAM at the `GrAxes` entry. Production capture never changes those flags. Original/HD fixtures use identical settings. The axis trailer is optional (`G89AXES1`); pre-axis cache files continue to display their original axes bitmap.
+Graph-format regression fixtures set the documented `GR_MODES` flags only in isolated test RAM at the `GrAxes` entry. Production capture never changes those flags. Original/HD fixtures use identical settings. The axis trailer is optional (`G89AXES2`, with `G89AXES1` backward compatibility); pre-axis cache files continue to display their original axes bitmap.
 
 Android HD frames target a 16 ms cadence, subtracting snapshot work from the interval and requesting Canvas invalidation on the next display frame. Short native CPU batches and frame/text snapshots share a fair Java gate so a waiting reader cannot be continually overtaken by turbo. The LCD and plot data are captured together; text recognition and Canvas rendering run outside the gate. There is no extra sleep in the overclock loop. Real hardware can still have a lower frame rate if recognition or drawing takes longer than the frame budget.
 
@@ -45,18 +53,51 @@ Android build 1168 fixes UI starvation outside graph-only tests: device logs fro
 
 Trace navigation exports verified ROM cursor/label identities alongside the axis segments. Both hosts reconstruct the 11×11 circle/cross cursor as vector geometry, retaining its centre and native blink timing. Plot-number cells use the same approved font as Sharp Text, independently of that setting. Original LCD data stays untouched; unknown cursor bitmaps retain the native fallback. The cursor pass clips above coordinate readouts.
 
-Held graph arrows use the ROM's larger 21×21 circle/cross cursor, captured separately from the resting 11×11 cursor. Cursor erase/restore/redraw transitions remain vector based. The shared CPU budget accelerates graph cursor movement without changing Y= or menu scrolling. This works with HD disabled too.
+Held graph arrows use the ROM's larger 21×21 circle/cross cursor, captured separately from the resting 11×11 cursor. Cursor erase/restore/redraw transitions remain vector based. The shared CPU budget accelerates held arrows throughout the calculator. This works with HD disabled too.
 
 
-Graph cursor speed is shared by free graph navigation and Trace, adjustable from
-1x to 10x (default 3x). A monotonic host clock starts the repeat budget at 0.5s;
-verified OSInitKeyDelay countdown decrements are held until that deadline and
-then released once. Native calculator movement, curve evaluation, release and
-subsequent repeat pacing remain intact. No persistent ROM/RAM delay setting is
-rewritten. Tests drive an isolated clock to check first and repeated holds,
-both graph modes, HD on/off, and unchanged Y= scrolling.
+**Cursor Scroll Speed** is adjustable from 1x to 10x (default 3x) and applies to
+held arrows throughout the calculator: graph navigation/Trace, Home input,
+Y= and mode-specific equation editors, and menus. A monotonic host clock gates
+the first repeat at **0.35 seconds**. Verified OSInitKeyDelay countdown decrements
+are held until that deadline, then released once. Subsequent native repeat
+pacing uses the chosen CPU budget multiplier. Single taps and other key holds
+stay unchanged; no persistent ROM/RAM keyboard setting is rewritten. Internal
+preference/API names still contain GraphCursorSpeed for compatibility.
+
+The multi-mode harness uses fresh sessions and an isolated real-time clock:
+
+```sh
+python3 tools/plot-trace/modes.py TI89Titanium_OS.89u --output build/plot-modes
+```
+
+It checks parametric circles, polar roses, sequence n², native 3D mesh/projection,
+y′=y against exp(x), completed/pending save states, unchanged window settings,
+rotation, and accelerated Home/editor holds across every mode. iOS UI tests cover
+each mode's rendered graph, arrow/Trace/menu navigation, and the original toggle.
+
+State trailer version 3 also saves pending density overrides. Loading an unfinished
+3D/DE graph safely finishes the native calculation and restores its original
+settings; the partial HD cache is discarded until a fresh ReGraph. Completed
+caches retain HD geometry. Versions 1/2 remain readable.
 
 Graph Math prompt rows retain validated medium-font DrawChar cells. Their
 complete text rectangle, including unchanged pixels and inter-word spaces,
 is excluded from vector repaint and is not classified as a cursor. This keeps
 intersection curve/bound/result prompts readable with sharp text on or off.
+
+Clipped 3D meshes can contain deleted edges (`-1` endpoints). Those records are
+skipped before validating the other endpoint, rather than discarding the entire
+HD scene. During rotation, live publication validates the current graph against
+its completed toolbar reference. 3D Trace may reserve a shorter client viewport;
+the cached scene is clipped to that viewport while retaining its vectors.
+
+Graph readout overlays protect full validated text cells, including polar theta
+and scientific-notation digits above the usual coordinate line. Text/plot locks
+keep the CPU's existing acquisition order. Both hosts use the shared mask.
+
+Retained text also tracks bounded pending DrawChar/DrawClipChar/DrawStr calls.
+A host snapshot during rasterization may omit an unfinished glyph, but cannot
+discard its identity before the native call returns. A fine-grained snapshot
+regression previously lost theta and most digits after movement; their completed
+identities now survive, without changing ROM pixels or approved font outlines.

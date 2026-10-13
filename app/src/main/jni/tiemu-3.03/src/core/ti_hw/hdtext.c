@@ -21,6 +21,11 @@ unsigned char hdtext_pages[65536];
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static Port ports[MAX_PORTS];
 static Saved saves[MAX_SAVES];
+/* Native glyph/string rasterization can span host frames. Keep those identities
+   pending until the drawing call returns instead of pruning partial glyphs. */
+typedef struct { uint32_t pc,sp,address;int left,right,y,font; } PendingText;
+static PendingText pending_text[16];
+static int pending_text_count;
 typedef struct { int kind,x,y,x1,y1,font,code,w,h,attr; } Primitive;
 typedef struct { uint32_t return_pc;int count,complete,alignment,entry,selected,history;Primitive items[512]; } Expression;
 static Expression expressions[MAX_EXPRESSIONS];static int expression_next,expression_active=-1;
@@ -185,6 +190,30 @@ static int same_bitmap(const Saved *s,uint32_t buffer) {
     }
     return 1;
 }
+static int begin_text(Port *p,int x,int y,int font,int right) {
+    if(!p)return -1;
+    for(int i=0;i<16;i++)if(!pending_text[i].pc) {
+        uint32_t sp=m68k_areg(regs,7),pc=long_at(sp);
+        if(!pc || sp+4>tihw.ram_size)return -1;
+        pending_text_count++;
+        pending_text[i]=(PendingText){pc,sp+4,p->address,x,right,y,font};watch(pc);return i;
+    }
+    return -1;
+}
+static void finish_text(uint32_t pc) {
+    if(!pending_text_count)return;
+    uint32_t sp=m68k_areg(regs,7);
+    for(int k=0;k<16;k++) {
+        PendingText *t=pending_text+k;if(!t->pc)continue;
+        if((pc!=t->pc || sp!=t->sp) && sp<=t->sp)continue;
+        Port *p=port_for(t->address,0);
+        if(p)for(int i=0;i<p->count;i++) {
+            Cell *c=p->cells+i;
+            if(c->font==t->font && c->y==t->y && c->x>=t->left && c->x<t->right)c->pending=0;
+        }
+        t->pc=0;pending_text_count--;
+    }
+}
 static void remember_primitive(Primitive item) {
     if(expression_active>=0) {
         Expression *e=&expressions[expression_active];
@@ -192,6 +221,7 @@ static void remember_primitive(Primitive item) {
     }
 }
 void hdtext_observe(uint32_t pc) {
+    finish_text(pc);
     if(!font_slot || !port_slot || !font_offsets[0])return;
     int font=byte_at(font_slot);if(font<0 || font>2)return;
     uint32_t address=long_at(port_slot),a=m68k_areg(regs,7)+4;
@@ -288,10 +318,16 @@ void hdtext_observe(uint32_t pc) {
         if(home_capture && expression_active<0 && address==tihw.lcd_adr && c.x<6 && c.code==16 && home_marker_count<32) {
             home_markers[home_marker_count]=c;home_marker_entries[home_marker_count++]=home_entry;
         }
+        c.pending=begin_text(p,c.x,c.y,c.font,c.x+c.w)>=0;
         insert(p,c);
     } else if(pc==draw_str) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+8);uint32_t s=long_at(a+4);
-        for(int i=0;i<256;i++) { int c=byte_at(s+i);if(c<=0)break;insert(p,character(x,y,font,c,attr));x+=width_of(font,c); }
+        int pending=begin_text(p,x,y,font,x);
+        for(int i=0;i<256;i++) {
+            int code=byte_at(s+i);if(code<=0)break;
+            Cell c=character(x,y,font,code,attr);c.pending=pending>=0;insert(p,c);x+=width_of(font,code);
+        }
+        if(pending>=0)pending_text[pending].right=x;
     } else if(pc==clear) {
         p->count=0;p->cursor_valid=0;
     } else if(pc==bitmap_get) {
@@ -329,11 +365,11 @@ void hdtext_run_begin(void) { pthread_mutex_lock(&lock);if(hdtext_active)initial
 void hdtext_run_end(void) { pthread_mutex_unlock(&lock); }
 void hdtext_enable(int enabled) {
     pthread_mutex_lock(&lock);
-    if(hdtext_active!=(enabled!=0)){memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));editor=0;home_capture=home_complete=home_marker_count=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));}
+    if(hdtext_active!=(enabled!=0)){memset(pending_text,0,sizeof(pending_text));pending_text_count=0;memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));editor=0;home_capture=home_complete=home_marker_count=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));}
     hdtext_active=enabled!=0;pthread_mutex_unlock(&lock);
 }
 void hdtext_reset(void) {
-    pthread_mutex_lock(&lock);ready=0;font_slot=port_slot=window_slot=shape_finish=0;memset(shape_sites,0,sizeof(shape_sites));memset(font_offsets,0,sizeof(font_offsets));
+    pthread_mutex_lock(&lock);memset(pending_text,0,sizeof(pending_text));pending_text_count=0;ready=0;font_slot=port_slot=window_slot=shape_finish=0;memset(shape_sites,0,sizeof(shape_sites));memset(font_offsets,0,sizeof(font_offsets));
     home_start=home_finish=home_record=0;home_capture=home_complete=home_marker_count=0;editor=heap_slot=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));
     memset(hdtext_pages,0,sizeof(hdtext_pages));memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));next_save=0;
     pthread_mutex_unlock(&lock);

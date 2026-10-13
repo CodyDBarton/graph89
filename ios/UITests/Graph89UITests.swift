@@ -355,6 +355,43 @@ final class Graph89UITests: XCTestCase {
         let b=XCTAttachment(screenshot:app.screenshot());b.name="Original sin(x squared)";b.lifetime = .keepAlways;add(b)
     }
 
+    func testHDParametric() { exerciseHDMode(2,minimum:1200) }
+    func testHDPolar() { exerciseHDMode(3,minimum:1200) }
+    func testHDSequence() { exerciseHDMode(4,minimum:10) }
+    func testHD3DWireframe() { exerciseHDMode(5,minimum:23000) }
+    func testHD3DClippedMesh() { exerciseHDMode(5,minimum:1000,clipped:true) }
+    func testHDDifferentialEquations() { exerciseHDMode(6,minimum:2000) }
+    private func exerciseHDMode(_ mode:Int,minimum:Int,clipped:Bool=false) {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-plot-mode",String(mode),"--ui-test-sharp-text"]
+        if clipped {app.launchArguments.append("--ui-test-clipped-3d")}
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:25))
+        tap(app,"DIAMOND");tap(app,"F3")
+        let overlay=app.otherElements["Sharp text rendering"]
+        func count()->Int {Int((overlay.value as? String ?? "").components(separatedBy:";")[0].replacingOccurrences(of:"plot:",with:"")) ?? 0}
+        let finished=NSPredicate {_,_ in count()>minimum && (app.staticTexts["Engine status"].value as? String ?? "").hasSuffix(",0")}
+        XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:finished,object:overlay)],timeout:60),.completed,"Mode \(mode) must finish in HD")
+        let shot=XCTAttachment(screenshot:app.screenshot());shot.name="HD graph mode \(mode)";shot.lifetime = .keepAlways;add(shot)
+        let navigationKeys=clipped ? ["F3","RIGHT","LEFT","ESC","F5","ESC"] : ["RIGHT","LEFT","F3","RIGHT","ESC","F5","ESC"]
+        var tracing=false
+        for key in navigationKeys {
+            if key=="F3" {tracing=true};if key=="ESC" {tracing=false}
+            tap(app,key)
+            let navigationResult=XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_,_ in count()>minimum},object:overlay)],timeout:5)
+            XCTAssertEqual(navigationResult,.completed,"Mode \(mode) lost HD on \(key)")
+            if mode==3 && (key=="F3" || key=="RIGHT") {
+                if tracing {XCTAssertTrue((overlay.value as? String ?? "").contains(";theta:1;readoutsComplete:1;thetaCursor:0"),"Theta and all Trace digits need complete sharp text cells: \(overlay.value as? String ?? "missing")")}
+                let trace=XCTAttachment(screenshot:app.screenshot());trace.name="Polar readouts \(key)";trace.lifetime = .keepAlways;add(trace)
+            }
+        }
+        tap(app,"Configuration Settings")
+        let toggle=app.switches["HD Plotting (Prototype)"]
+        for _ in 0..<8 {if toggle.isHittable {break};app.swipeUp()}
+        toggle.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap();tap(app,"Done")
+        XCTAssertEqual(XCTWaiter.wait(for:[XCTNSPredicateExpectation(predicate:NSPredicate {_,_ in count()==0},object:overlay)],timeout:10),.completed)
+    }
+
     func testHDTraceHeldArrow() {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-sharp-text"]
@@ -793,7 +830,7 @@ extension Graph89UITests {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session"]
         app.launch();tap(app,"Configuration Settings")
-        let slider=app.sliders["Graph Cursor Speed"]
+        let slider=app.sliders["Cursor Scroll Speed"]
         XCTAssertTrue(slider.waitForExistence(timeout:10))
         XCTAssertEqual(slider.value as? String,"3x")
         slider.adjust(toNormalizedSliderPosition:1)

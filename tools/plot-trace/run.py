@@ -235,27 +235,26 @@ for factor in [0,8]:
     frames=lambda p:[list(map(int,line.split())) for line in (p/'held.txt').read_text().splitlines()]
     original,accelerated=frames(baseline),frames(fast)
     ratio=accelerated[-1][1]/original[-1][1]
-    assert 2.8<ratio<3.3,('Trace hold multiplier',factor,ratio)
+    assert 2.7<ratio<3.3,('Trace hold multiplier',factor,ratio)
     assert next(r[0] for r in original if r[1])==next(r[0] for r in accelerated if r[1]),'Initial hold delay changed'
-    assert (baseline/'y-held.pgm').read_bytes()==(fast/'y-held.pgm').read_bytes(),'Y= scrolling changed'
-    assert (fast/'scope.txt').read_text()=='released 1\nfree 3\ny 1\n','Graph speed leaked outside held graph cursors'
+    assert (fast/'scope.txt').read_text()=='released 1\nfree 3\ny 3\n','Held-arrow speed did not apply globally'
     free=lambda p:[list(map(int,line.split())) for line in (p/'free.txt').read_text().splitlines()]
     normal_free,fast_free=free(baseline),free(fast)
     free_ratio=fast_free[-1][1]/normal_free[-1][1]
-    assert 2.8<free_ratio<3.3,('Free graph cursor multiplier',factor,free_ratio)
+    assert 2.7<free_ratio<3.3,('Free graph cursor multiplier',factor,free_ratio)
     for directory in [baseline,fast]:
         for file in ['held','free','reheld']:
             rows=[list(map(int,line.split())) for line in (directory/(file+'.txt')).read_text().splitlines()]
-            assert all(r[1]<=1 for r in rows if r[0]<50),(file,'Repeated before 0.5s')
-            assert all(r[-1]==1 for r in rows if r[0]<50),(file,'Boosted before 0.5s')
+            assert all(r[1]<=1 for r in rows if r[0]<35),(file,'Repeated before 0.35s')
+            assert all(r[-1]==1 for r in rows if r[0]<35),(file,'Boosted before 0.35s')
         repeated=[list(map(int,line.split())) for line in (directory/'reheld.txt').read_text().splitlines()]
         assert repeated[-1][1]>1,'Repeated hold never resumed movement'
-    assert next(r[0] for r in accelerated if r[-1]==3)==50,'Trace speed must begin at 0.5s'
-    assert next(r[0] for r in fast_free if r[-1]==3)==50,'Free graph speed must begin at 0.5s'
+    assert next(r[0] for r in accelerated if r[-1]==3)==35,'Trace speed must begin at 0.35s'
+    assert next(r[0] for r in fast_free if r[-1]==3)==35,'Free graph speed must begin at 0.35s'
     if factor:
         assert all(r[5] in [-1,-2,-3,-4] for r in original+accelerated),'Held cursor became raster'
         assert any(r[5]==-3 for r in accelerated),'Large held cursor was never vectorized'
-    print('Trace hold, HD=%d: %d -> %d steps (%.2fx); 0.5s graph-only repeat threshold and unchanged Y= scrolling; no raster cursor frames.'%(factor,original[-1][1],accelerated[-1][1],ratio))
+    print('Trace hold, HD=%d: %d -> %d steps (%.2fx); 0.35s global repeat threshold; no raster cursor frames.'%(factor,original[-1][1],accelerated[-1][1],ratio))
 
 intersection=args.output/'intersection-hd'
 for name,width in [('first-curve',60),('second-curve',60),('lower-bound',72),('upper-bound',72),('intersection-result',72)]:

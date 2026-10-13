@@ -51,15 +51,16 @@ final class HDPlotRenderer {
         Path geometry=new Path();
         if(decorations!=null)for(int i=0;i+3<decorations.length;i+=4){
             float x=decorations[i],y=decorations[i+1],u=decorations[i+2],v=decorations[i+3];
-            if(Float.isNaN(x))continue;
+            if(Float.isNaN(x)){if(y==-5 || y==-6){paint.setStyle(Paint.Style.FILL);paint.setAntiAlias(true);if(y==-6)canvas.drawRect(u-1.5f,v-1.5f,u+1.5f,v+1.5f,paint);else canvas.drawCircle(u,v,1.0f,paint);}continue;}
             if(x==u&&y==v){paint.setStyle(Paint.Style.FILL);canvas.drawCircle(x,y,stroke/2,paint);}
             else {geometry.moveTo(x,y);geometry.lineTo(u,v);}
         }
         paint.setStyle(Paint.Style.STROKE);canvas.drawPath(geometry,paint);
+        boolean surface=false;if(decorations!=null)for(int i=0;i+3<decorations.length;i+=4)if(Float.isNaN(decorations[i])&&decorations[i+1]==-7&&decorations[i+2]==5)surface=true;
         Path curve=new Path();boolean previous=false;double previousX=0,previousY=0;
         for(int i=4;i+1<points.length;i+=2){float x=points[i]+0.5f,y=points[i+1]+0.5f;
             if(Float.isNaN(x)||Float.isNaN(y)||Float.isInfinite(x)||Float.isInfinite(y)){previous=false;continue;}
-            boolean crossesPole=previous && ((previousY<16 && y>93)||(previousY>93 && y<16));
+            boolean crossesPole=!surface && previous && ((previousY<16 && y>93)||(previousY>93 && y<16));
             if(previous && !crossesPole){
                 double dx=x-previousX,dy=y-previousY,lo=0,hi=1;boolean valid=true;
                 double[] d={-dx,dx,-dy,dy},q={previousX-points[0],points[2]-previousX,previousY-points[1],points[3]-previousY};

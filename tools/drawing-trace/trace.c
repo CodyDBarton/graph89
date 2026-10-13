@@ -3,6 +3,7 @@
 #include "Graph89Core.h"
 #include "ti68k_def.h"
 #include "keydefs.h"
+extern double graph89_cursor_test_time;
 #include "libuae.h"
 #include "romcalls.h"
 #include "hdtext.h"
@@ -124,7 +125,12 @@ static void sample_during_drawing(uint32_t pc) {
 }
 #endif
 static void run(unsigned n) { graph89_run(n); }
-static void press(int key) { graph89_key(key,1);run(400000);graph89_key(key,0);run(400000); }
+static void press(int key) {
+    double start=graph89_cursor_test_time+0.2;graph89_cursor_test_time=start;
+    graph89_key(key,1);
+    for(int i=0;i<4;i++){graph89_cursor_test_time=start+i*0.025;run(250000);}
+    graph89_cursor_test_time=start+0.1;graph89_key(key,0);run(1000000);
+}
 static void snapshot(const char *dir,const char *name) {
     char p[4096];snprintf(p,sizeof(p),"%s/%s.pgm",dir,name);
     uint8_t pixels[16000];graph89_copy_screen(pixels);
@@ -193,10 +199,14 @@ int main(int argc,char **argv) {
     if(trace)graph89_instruction_trace=observe;
     else if(retained)graph89_instruction_trace=sample_during_drawing;
 #endif
+    /* Compare drawing with a controlled input clock: tracing must not change
+       how long fixed-instruction keypresses appear to be held. */
+    graph89_cursor_test_time=0;
     graph89_retained_text_enable(retained);
     clock_t start=clock();
     run(30000000);snapshot(argv[2],"00-boot");
     phase="home";press(TIKEY_HOME);press(TIKEY_CLEAR);snapshot(argv[2],"01-home");
+    char fresh_state[4096];snprintf(fresh_state,sizeof fresh_state,"%s/fresh.state",argv[2]);if(graph89_save(fresh_state))return 3;
     phase="input";text("1/sin(x^2)");snapshot(argv[2],"02-input");
     if(retained) {
         uint8_t pixels[16000];graph89_copy_screen(pixels);int32_t packets[8192*12];
@@ -260,7 +270,10 @@ int main(int argc,char **argv) {
     snapshot(argv[2],"23d0-y-extra-equation");
     phase="y-extra-scrolled";for(int i=0;i<10;i++)press(TIKEY_DOWN);snapshot(argv[2],"23d00-y-extra-scrolled");
     for(int i=0;i<10;i++)press(TIKEY_UP);press(TIKEY_DOWN);press(TIKEY_DOWN);
-    phase="compact-graph-prep";press(TIKEY_UP);press(TIKEY_UP);press(TIKEY_CLEAR);text("x");press(TIKEY_ENTER1);
+    /* Start application-transition checks from a known valid equation rather
+       than depending on the focus left by the scrolling stress fixtures. */
+    if(graph89_restore(fresh_state))return 4;
+    phase="compact-graph-prep";press(TIKEY_HOME);press(TIKEY_DIAMOND);press(TIKEY_F1);press(TIKEY_CLEAR);text("x");press(TIKEY_ENTER1);
     phase="compact-graph";press(TIKEY_DIAMOND);press(TIKEY_F3);run(8000000);snapshot(argv[2],"23d1-graph");
     phase="compact-window";press(TIKEY_DIAMOND);press(TIKEY_F2);snapshot(argv[2],"23d2-window");
     phase="home-return";press(TIKEY_HOME);snapshot(argv[2],"23e-home-return");

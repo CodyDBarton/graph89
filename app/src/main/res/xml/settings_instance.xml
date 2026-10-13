@@ -8,11 +8,11 @@
 
     <com.graph89.controls.SeekBarPreference
         android:defaultValue="3"
-        android:dialogTitle="Graph Cursor Speed"
+        android:dialogTitle="Cursor Scroll Speed"
         android:key="CONF_GRAPH_CURSOR_SPEED"
         android:persistent="true"
-        android:title="Graph Cursor Speed"
-        android:summary="Held movement for free graph and Trace cursors. Starts after 0.5 seconds. Other screens are unchanged."
+        android:title="Cursor Scroll Speed"
+        android:summary="Held-arrow movement throughout the calculator. Starts after 0.35 seconds of real time. Single taps are unchanged."
         seek:minValue="1"
         seek:maxValue="10" />
 
@@ -65,7 +65,7 @@
             android:defaultValue="false"
             android:key="CONF_HD_PLOT"
             android:title="HD Plotting (Prototype)"
-            android:summary="Plot sharp axes, ticks and grid dots, with eight curve samples per original LCD column. Use F4 ReGraph after enabling. Turn off for the original graph. Requires Solid LCD with grayscale off." />
+            android:summary="Sharper Function, Parametric, Polar, Sequence, 3D wireframe and differential-equation graphs. Uses additional calculator evaluations where appropriate. Use F4 ReGraph after enabling. Turn off for the original graph. Other 3D styles retain the original display. Requires Solid LCD with grayscale off." />
 
         <CheckBoxPreference
             android:defaultValue="false"

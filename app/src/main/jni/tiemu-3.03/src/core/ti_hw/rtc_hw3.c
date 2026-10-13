@@ -39,6 +39,9 @@
 #include "ti68k_def.h"
 #include "rtc_hw3.h"
 #include "gettimeofday.h"
+#ifdef GRAPH89_TEST_CLOCK
+extern double graph89_cursor_test_time;
+#endif
 
 int rtc3_init(void)
 {
@@ -86,6 +89,14 @@ int rtc3_exit(void)
 // Problem: We'll have to bump the savefile revision if we do that. :-(
 void rtc3_get_time(TTIME* tt)
 {
+#ifdef GRAPH89_TEST_CLOCK
+    /* Host-only regression clock; installed apps always use the real RTC. */
+    if(graph89_cursor_test_time>=0) {
+        time_t seconds=(time_t)graph89_cursor_test_time;
+        int milliseconds=(int)((graph89_cursor_test_time-seconds)*1000)+tihw.rtc3_beg.ms;
+        tt->s=tihw.rtc3_beg.s+seconds+milliseconds/1000;tt->ms=milliseconds%1000;return;
+    }
+#endif
 	struct timeval tp;
 	gettimeofday(&tp, NULL);
 	tt->s = tp.tv_sec;

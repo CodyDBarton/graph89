@@ -332,11 +332,27 @@ final class CalculatorEngine {
                     graph89_type_text((1...12).map {"\($0)+1\n"}.joined())
                 }
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
+                    let args = ProcessInfo.processInfo.arguments
+                    let modeIndex = args.firstIndex(of:"--ui-test-plot-mode")
+                    let mode = modeIndex.flatMap { $0+1<args.count ? Int(args[$0+1]):nil } ?? 1
+                    if (2...6).contains(mode) {
+                        for key:Int32 in [82,56] {
+                            graph89_key(key,1);graph89_run(400_000)
+                            graph89_key(key,0);graph89_run(400_000)
+                        }
+                        let names=["FUNCTION","PARAMETRIC","POLAR","SEQUENCE","3D","DIFF EQUATIONS"]
+                        graph89_type_text("setMode(\"Graph\",\"\(names[mode-1])\")\n")
+                        graph89_run(30_000_000)
+                    }
                     for key:Int32 in [82,6,49,56] {
                         graph89_key(key,1);graph89_run(400_000)
                         graph89_key(key,0);graph89_run(400_000)
                     }
-                    graph89_type_text(ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot-multiple") ? "sin(x^2)\ncos(x)":"sin(x^2)")
+                    let equations=["sin(x^2)","cos(t)\nsin(t)","2*cos(3*q)","n^2","sin(x)*cos(y)","y1\n1"]
+                    let equation=args.contains("--ui-test-clipped-3d") ? "100*sin(x)*cos(y)" : args.contains("--ui-test-hd-plot-multiple") ? "sin(x^2)\ncos(x)" : equations[min(6,max(1,mode))-1]
+                    // TI theta is calculator byte 136, not UTF-8.
+                    let bytes=equation.utf8.map { CChar(bitPattern: mode==3 && $0==113 ? 136:$0) }+[0]
+                    bytes.withUnsafeBufferPointer { graph89_type_text($0.baseAddress!) }
                     for _ in 0..<400 {graph89_run(50_000)}
                     graph89_key(76,1);graph89_run(400_000)
                     graph89_key(76,0);graph89_run(400_000)
@@ -857,7 +873,7 @@ final class ConfigurationController: UIViewController {
         }
         stack.addArrangedSubview(limits)
         let cursorLabel = UILabel()
-        cursorLabel.text = "Graph Cursor Speed"
+        cursorLabel.text = "Cursor Scroll Speed"
         cursorLabel.font = .preferredFont(forTextStyle: .headline)
         cursorValue.font = .monospacedDigitSystemFont(ofSize: 20, weight: .semibold)
         cursorValue.textAlignment = .right
@@ -866,11 +882,11 @@ final class ConfigurationController: UIViewController {
         stack.addArrangedSubview(cursorRow)
         cursorSlider.minimumValue = 1
         cursorSlider.maximumValue = 10
-        cursorSlider.accessibilityLabel = "Graph Cursor Speed"
+        cursorSlider.accessibilityLabel = "Cursor Scroll Speed"
         cursorSlider.addTarget(self, action: #selector(cursorChanged), for: .valueChanged)
         stack.addArrangedSubview(cursorSlider)
         let cursorDetail = UILabel()
-        cursorDetail.text = "1–10× held movement for free graph and Trace cursors. Default: 3×. Starts after 0.5 seconds. Other screens are unchanged."
+        cursorDetail.text = "1–10× held-arrow movement throughout the calculator. Default: 3×. Starts after 0.35 seconds of real time. Single taps are unchanged."
         cursorDetail.font = .preferredFont(forTextStyle: .subheadline)
         cursorDetail.textColor = .secondaryLabel
         cursorDetail.numberOfLines = 0
@@ -963,7 +979,7 @@ final class ConfigurationController: UIViewController {
         let plotRow=UIStackView(arrangedSubviews:[plotLabel,plotSwitch]);plotRow.spacing=12
         stack.addArrangedSubview(plotRow)
         let plotDetail=UILabel()
-        plotDetail.text="Plot sharp axes, ticks and grid dots, with eight curve samples per original LCD column. Use F4 ReGraph after enabling. Turn off for the original graph. Other graph types and trace views use the original display."
+        plotDetail.text="Sharper Function, Parametric, Polar, Sequence, 3D wireframe and differential-equation graphs. Uses additional calculator evaluations where appropriate. Use F4 ReGraph after enabling. Turn off for the original graph. Other 3D styles retain the original display."
         plotDetail.font = .preferredFont(forTextStyle:.subheadline)
         plotDetail.textColor = .secondaryLabel;plotDetail.numberOfLines=0
         stack.addArrangedSubview(plotDetail)

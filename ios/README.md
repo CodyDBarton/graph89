@@ -23,6 +23,8 @@ Returning to the app resumes the saved calculator session and wakes the display.
 The power key is labeled ON with blue OFF above it; 2ND + ON turns the calculator off.
 Tapping a key wakes a sleeping calculator. Uninstalling the app removes its state.
 A free Personal Team's device provisioning expires after seven days; reinstall from Xcode to renew it.
+
+The shared scheme uses **Release** for the normal Run action. Swift text recognition and compact layout need compiler optimization to stay responsive on physical devices. For deliberate source debugging, select **Product → Scheme → Edit Scheme → Run → Info → Build Configuration → Debug**; restore Release for normal use. Tests retain their separate configuration.
 Keep the bundled firmware and generated builds local.
 
 ## Configuration Settings
@@ -97,7 +99,7 @@ in a fresh process. The `.pgm` file is a 160×100 grayscale screenshot.
 To build for a simulator or device without opening Xcode:
 
 ```sh
-xcodebuild -project ios/Graph89.xcodeproj -scheme Graph89 -sdk iphonesimulator -derivedDataPath ios/build/Xcode CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project ios/Graph89.xcodeproj -scheme Graph89 -configuration Release -sdk iphonesimulator -derivedDataPath ios/build/Xcode CODE_SIGNING_ALLOWED=NO build
 xcodebuild -project ios/Graph89.xcodeproj -scheme Graph89 -configuration Release -sdk iphoneos -derivedDataPath ios/build/Xcode-device CODE_SIGNING_ALLOWED=NO build
 ```
 
