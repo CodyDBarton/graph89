@@ -25,6 +25,9 @@ void hdtext_reset(void);
    11: glyph from the extra Y= drawing rows, attribute=original font.
    12: Home history marker glyph, attribute=original font, clipLeft=pair ID.
    13: completed extended Home paint pass; permits packing its retained rows.
+   14: unfinished native glyph/raster reservation; x/y/width/height and clip bounds protect raster fallback.
+       attribute=original font, or -1 for a whole raster operation.
+       This packet supplies no glyph and must never erase or render artwork.
    Groups exceeding capture capacity are omitted whole. Returns packet count. */
 /* Same export while caller holds the batch/snapshot lock. */
 int hdtext_copy_locked(const uint8_t *pixels, int32_t *packets, int capacity);

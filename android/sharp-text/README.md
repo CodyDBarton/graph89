@@ -158,3 +158,15 @@ Repacking preserves the native lower scrolling boundary: newer entries lying ful
 Compact Y= layout also remains active when Plot1/2/3 is selected. The verified list paint pass is independent of whether the bottom equation editor is focused. Plot dialogs and other calculator screens retain their existing layout.
 
 HD Plotting renders vector axes, ticks and grid dots, and adds real ROM evaluations for ordinary Titanium AMS 3.10 function graphs, with eight samples per native LCD column. It is independent of Sharp Text; use Solid LCD and disable grayscale. Enable it in Configuration Settings and use Graph F4 ReGraph. Original display is available by turning the setting off; other modes/styles and trace views stay original. See [the plotting prototype](../../tools/plot-trace/README.md).
+
+### Sharp disabled text (Android build 1180; also iOS)
+
+Retained A_SHADED labels now validate against the ROM's actual alternating LCD-byte masks and render the existing approved outlines at half contrast. Native character identity, selection inversion and clip rectangles remain authoritative. Graphics in blank padding remain original. Unfinished and mismatching draws keep their pixels under the existing raster reservation mechanism. This changes disabled styling, not font designs. Missing arrows, markers, raised minus and mu have preview-only comparison sheets awaiting approval.
+
+### Approved remaining symbols and error recovery (build 1181; also iOS)
+
+The approved return-arrow revision 2, lock/check/square markers, directional arrows and triangles, shift/diamond markers, raised minus, and mu are integrated at all three ROM sizes. `build-remaining-font.py` records the approved preview's vector drawing calls, adds 48 size-specific outlines, retains their exact native offsets through correct side bearings, and verifies existing contours are unchanged. Recognizers accept these sixteen symbols only with native drawing identity; they never infer UI markers from arbitrary graph/bitmap pixels.
+
+Closing a Home error dialog now restores the completed compact history layout alongside its saved bitmap. A snapshot is bounded to 64 expressions and eight bitmap saves, and is used only after the raster operation finishes and all 10,720 restored Home body pixels match. Fresh Home paint passes invalidate previous groups. Snapshots are freed on reuse, disable and reset. The actual `lcm(20,30,40)` sequence is tested through five errors, dismissals, clears, scrolling, menus and subsequent valid evaluations; the native Home framebuffer stays identical to an original-display run.
+
+Home primitive capture also rejects entry/status rows during a mathematical render. Keyboard interrupts can paint the Alpha annunciator while Print2DExpr is on the stack; retaining its y=95 glyphs inflated a fraction's captured bounds from 23 to 81 units and overlapped subsequent answers. The rapid queued LCM regression verifies three clean history pairs and no foreign status children. Y= extra-row capture remains enabled.

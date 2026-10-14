@@ -50,12 +50,17 @@ Stretch mode is saved and applies immediately:
 CPU Speed ranges from 30% to 250%; Overclock when Busy runs extra work while the
 calculator shows BUSY. Changes apply immediately and are saved independently of
 calculator state. Restore Defaults sets 100% CPU Speed, enables busy overclocking,
-selects Aspect ratio; no loss, and restores 8 ms haptic feedback.
+selects Aspect ratio; no loss, and restores 30 ms haptic feedback.
 
-Haptic Feedback matches Android's 0–30 ms duration setting (8 ms by default,
-0 disables it). A vibration plays once on each calculator key press, never on
-release. Core Haptics provides timed vibration on supported hardware; the physical
-feel differs by device. Simulators and devices without haptic hardware remain silent.
+Haptic Feedback retains the 0–250 ms duration slider (30 ms default; zero disables
+feedback). Each key-down plays exactly one continuous Core Haptics event with
+that effective pattern duration and minimum attack/release envelopes. The runtime
+continuous-event offset is measured when constructing a pattern, preventing
+short requests from becoming zero-duration patterns. No fixed UIKit click or long
+system vibration is added. The engine stays warm while foreground; each press
+creates a new finite player rather than stopping/restarting the same player.
+Simulators and devices without haptic hardware remain silent. Saved duration
+preferences are preserved. Physical motor response still requires phone testing.
 
 The iOS port now uses Android's model-specific engine batch size (90,000 CPU-loop
 iterations for this Titanium at 100%) and pause calculation: truncate(30 / speed)
@@ -223,3 +228,18 @@ Repacking preserves the native lower scrolling boundary: newer entries lying ful
 Compact Y= layout also remains active when Plot1/2/3 is selected. The verified list paint pass is independent of whether the bottom equation editor is focused. Plot dialogs and other calculator screens retain their existing layout.
 
 HD Plotting is now a separate prototype setting for ordinary Titanium AMS 3.10 function graphs. It adds real ROM evaluations at eight samples per native LCD column and draws their unrounded coordinates. Axes, ticks and grid dots also render as thin device-resolution vectors; stored equations and the original LCD remain intact. Enable it and use Graph F4 ReGraph; turn it off for the original graph. Other modes/styles and trace views retain the original display. Completed HD graphs and in-flight evaluator continuations survive calculator save/restore. See [the plotting prototype](../tools/plot-trace/README.md) for scope and isolated numerical checks.
+
+Rapid taps use an ordered engine-queue delivery buffer. Each press and release spans a verified native scanning interval; subsequent touches cannot cancel a pending release or merge into a hold. Pending transitions drain without pacing sleeps, while an actual held key keeps normal pacing and the 0.35-second repeat threshold. Pause clears queued input. Real-ROM burst checks: `python3 tools/key-input/run.py TI89Titanium_OS.89u`.
+
+Transition cleanup (Android build 1179): native packet 14 reserves clipped unfinished glyph cells; both recognizers respect native cells even for unsupported characters, preventing fragment/lookalike substitutions during menu and status redraws. Graph readout masks reserve pending text too. The approved font is unchanged. See `tools/visual-stress/README.md` for the 595-action exploration and cross-platform verification.
+
+Approved remaining symbols share the Android font asset and size-specific private glyphs. Native-identity-only recognition prevents squares/arrows/check marks being guessed from graphics. Home error-dialog recovery also uses the shared native bitmap/layout snapshot validator.
+
+`--haptic-diagnostics` requests four pulses and records the requested duration,
+actual pattern duration, start count, engine/player mute flags and errors in
+`Library/Caches/haptic-diagnostics.json`. API success is not proof of tactile
+playback. Engine callbacks are tied to their owning instance so delayed stop
+notifications cannot invalidate a new foreground engine.
+
+`--haptic-log` validates all 1–250 ms patterns on the actual device and records
+manual key presses without automatically triggering any pulses.

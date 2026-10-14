@@ -52,8 +52,6 @@ final class CalculatorController: UIViewController {
     private var ready = false
     private var stateURL: URL!
     private var lastPixels = Data()
-    private var pressedAt: [Int: CFTimeInterval] = [:]
-    private var releases: [Int: DispatchWorkItem] = [:]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -165,6 +163,7 @@ final class CalculatorController: UIViewController {
                 self.engine.fontTemplates { [weak self] data in
                     guard let self else { return }
                     self.hdDisplay.configure(data)
+                    if ProcessInfo.processInfo.arguments.contains("--ui-test-lcm-error"),let folder=FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask).first {try? data.write(to:folder.appendingPathComponent("lcm-fonts.bin"))}
                     if !self.lastPixels.isEmpty { self.hdDisplay.update(self.lastPixels) }
                 }
                 let link = CADisplayLink(target: self, selector: #selector(self.tick))
@@ -184,25 +183,7 @@ final class CalculatorController: UIViewController {
 
     private func setKey(_ key: Int, pressed: Bool) {
         guard ready else { return }
-        releases.removeValue(forKey: key)?.cancel()
-        if pressed {
-            if pressedAt[key] == nil {
-                pressedAt[key] = CACurrentMediaTime()
-                engine.setKey(key, pressed: true)
-            }
-        } else if let began = pressedAt[key] {
-            // Preserve enough emulated scanning time at the slider's slower settings.
-            let factor = Double(settings.cpuPercent) / 100
-            let minimumHold = max(0.03, 0.16 / (factor * factor))
-            let delay = max(0, minimumHold - (CACurrentMediaTime() - began))
-            let release = DispatchWorkItem { [weak self] in
-                self?.engine.setKey(key, pressed: false)
-                self?.pressedAt.removeValue(forKey: key)
-                self?.releases.removeValue(forKey: key)
-            }
-            releases[key] = release
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: release)
-        }
+        engine.setKey(key, pressed: pressed)
     }
 
     @objc private func openSettings() {
@@ -236,6 +217,11 @@ final class CalculatorController: UIViewController {
     }
 
     private func refreshScreen(_ data: Data, retained: [Int32]) {
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-lcm-error"),let folder=FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask).first {
+            var pgm=Data("P5\n160 100\n255\n".utf8);pgm.append(data);try? pgm.write(to:folder.appendingPathComponent("lcm-current.pgm"))
+            let packets=stride(from:0,to:retained.count,by:12).map {Array(retained[$0..<$0+12])}
+            if let json=try? JSONSerialization.data(withJSONObject:packets) {try? json.write(to:folder.appendingPathComponent("lcm-current.cells.json"))}
+        }
         hdDisplay.update(data, retained: retained)
         guard data != lastPixels else { return }
         lastPixels = data
@@ -254,10 +240,7 @@ final class CalculatorController: UIViewController {
         engine.pause()
         keyHaptics.pause()
         keyboard.releaseAll()
-        for task in releases.values { task.cancel() }
-        releases.removeAll()
-        for key in pressedAt.keys { engine.setKey(key, pressed: false) }
-        pressedAt.removeAll()
+
     }
     func resume() {
         guard ready else { return }
@@ -313,6 +296,8 @@ final class CalculatorEngine {
     private var cpuPercent = 100
     private var overclock = true
     private var heldKeys = Set<Int>()
+    private var keyInput = CalculatorKeyInput()
+    private var wakeReleaseAt: CFTimeInterval = 0
     private var normalIterations: UInt64 = 0
     private var turboIterations: UInt64 = 0
 
@@ -324,6 +309,12 @@ final class CalculatorEngine {
                 let restored = !fresh && FileManager.default.fileExists(atPath: state) && graph89_restore(state) == 0
                 if !restored { for _ in 0..<600 { graph89_run(50_000) } }
                 self.ready = true
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-lcm-error") {
+                    for key:Int32 in [82,56] {
+                        graph89_key(key,1);graph89_run(400_000);graph89_key(key,0);graph89_run(400_000)
+                    }
+                    graph89_type_text("1/sin(x^2)\n(12345+67890)^2\nsqrt(2)\nlcm(20,30,40)\n")
+                }
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-history") {
                     for key:Int32 in [82,56] {
                         graph89_key(key,1);graph89_run(400_000)
@@ -382,13 +373,14 @@ final class CalculatorEngine {
     func setKey(_ key: Int, pressed: Bool) {
         queue.async {
             guard self.ready else { return }
-            if pressed {
+            if pressed && graph89_screen_is_on() == 0 {
                 graph89_wake()
-                self.heldKeys.insert(key)
-            } else {
-                self.heldKeys.remove(key)
+                // AMS resumes its application asynchronously after power-on.
+                // Keep the waking key down long enough to reach that app.
+                self.wakeReleaseAt = CACurrentMediaTime() + 0.16
             }
-            graph89_key(Int32(key), pressed ? 1 : 0)
+            self.keyInput.enqueue(key, pressed: pressed)
+            self.deliverKeyEvents()
             self.restart()
         }
     }
@@ -398,6 +390,8 @@ final class CalculatorEngine {
             self.generation += 1
             for key in self.heldKeys { graph89_key(Int32(key), 0) }
             self.heldKeys.removeAll()
+            self.keyInput.reset()
+            self.wakeReleaseAt = 0
         }
     }
     func resume() {
@@ -407,6 +401,25 @@ final class CalculatorEngine {
             self.running = true
             self.restart()
         }
+    }
+    private func deliverKeyEvents() {
+        guard heldKeys.isEmpty || CACurrentMediaTime() >= wakeReleaseAt else { return }
+        for event in keyInput.takeReady() {
+            if event.pressed { heldKeys.insert(event.key) }
+            else { heldKeys.remove(event.key) }
+            graph89_key(Int32(event.key), event.pressed ? 1 : 0)
+        }
+    }
+    private func runWithKeyScanning(_ instructions: Int32) {
+        var remaining = Int(instructions)
+        while remaining > 0 {
+            deliverKeyEvents()
+            let count = keyInput.runLimit(remaining)
+            graph89_run(Int32(count))
+            keyInput.advance(count)
+            remaining -= count
+        }
+        deliverKeyEvents()
     }
     private func restart() {
         generation += 1
@@ -429,17 +442,18 @@ final class CalculatorEngine {
             // to the queue to service pending ON, settings, lifecycle and LCD reads.
             let deadline = CACurrentMediaTime() + 0.010
             repeat {
-                graph89_run(10_000)
+                runWithKeyScanning(10_000)
                 turboIterations += 10_000
             } while CACurrentMediaTime() < deadline && graph89_is_busy() != 0
         } else {
             let count = graph89_batch_size(Int32(cpuPercent))
-            graph89_run(count)
+            runWithKeyScanning(count)
             normalIterations += UInt64(count)
         }
         let stillTurbo = overclock && heldKeys.isEmpty && graph89_is_busy() != 0
         let normalDelay = Double(Int(30 / (Double(cpuPercent) / 100))) / 1000
-        schedule(after: stillTurbo ? 0 : normalDelay, generation: token)
+        let drainInput = keyInput.hasPending && (heldKeys.isEmpty || CACurrentMediaTime() >= wakeReleaseAt)
+        schedule(after: stillTurbo || drainInput ? 0 : normalDelay, generation: token)
     }
     func frame(completion: @escaping (Frame) -> Void) {
         queue.async {
@@ -569,7 +583,7 @@ final class CalculatorKeyboard: UIView {
                 y: (key.center.y - 35) / 1014 * bounds.height, width: 100 / 635 * bounds.width, height: 70 / 1014 * bounds.height)
             element.activate = { [weak self] in
                 self?.onKey?(key.code, true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { self?.onKey?(key.code, false) }
+                self?.onKey?(key.code, false)
             }
             return element
         }
@@ -691,67 +705,154 @@ enum StretchMode: String, CaseIterable {
 
 final class CalculatorHaptics {
     private(set) var requests = 0
-    private var engine: CHHapticEngine?
-    private var player: CHHapticPatternPlayer?
-    private var duration = 8
+    private var duration = 30
     private var active = false
     private let supported = CHHapticEngine.capabilitiesForHardware().supportsHaptics
+    private var engine: CHHapticEngine?
+    private var engineRunning = false
+    private var player: CHHapticPatternPlayer?
+    private var diagnosticStarted = false
+    private var successfulStarts = 0
+    private var lastError = ""
+    private var lastPatternDuration: TimeInterval = 0
+    private var verifiedDurations: [Double] = []
 
+    // One sustained event only: no transient, UIKit click, or system buzz.
+    // The event's own duration ends playback; no main-thread stop timer is used.
+    static func pattern(milliseconds: Int) throws -> CHHapticPattern? {
+        guard milliseconds > 0 else { return nil }
+        let desired = Double(min(250, milliseconds)) / 1000
+        func make(_ eventDuration: TimeInterval) throws -> CHHapticPattern {
+            let event = CHHapticEvent(eventType: .hapticContinuous, parameters: [
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: 1),
+                CHHapticEventParameter(parameterID: .attackTime, value: 0),
+                CHHapticEventParameter(parameterID: .releaseTime, value: 0),
+                CHHapticEventParameter(parameterID: .sustained, value: 1)
+            ], relativeTime: 0, duration: eventDuration)
+            return try CHHapticPattern(events: [event], parameters: [])
+        }
+        let direct = try make(desired)
+        if abs(direct.duration - desired) < 0.000001 { return direct }
+        // Core Haptics subtracts an internal continuous-event offset on some
+        // runtimes (20 ms on the tested SDK). Probe the runtime rather than
+        // hardcoding a platform assumption; sub-offset pulses otherwise have
+        // a zero-length playback pattern despite successful start calls.
+        let reference = try make(0.1)
+        let offset = max(0, 0.1 - reference.duration)
+        let corrected = try make(desired + offset)
+        guard abs(corrected.duration - desired) < 0.000001 else {
+            throw NSError(domain: "Graph89Haptics", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot construct selected pulse duration"])
+        }
+        return corrected
+    }
+
+    private func record(_ message: String) {
+        guard ProcessInfo.processInfo.arguments.contains("--haptic-diagnostics") || ProcessInfo.processInfo.arguments.contains("--haptic-log") else { return }
+        let values: [String: Any] = ["message": message, "supported": supported,
+            "duration": duration, "active": active, "requests": requests,
+            "successfulStarts": successfulStarts, "error": lastError,
+            "patternMilliseconds": lastPatternDuration * 1000,
+            "engineRunning": engineRunning, "engineMuted": engine?.isMutedForHaptics ?? false,
+            "playerMuted": player?.isMuted ?? false, "verifiedMilliseconds": verifiedDurations]
+        if let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+           let data = try? JSONSerialization.data(withJSONObject: values, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: folder.appendingPathComponent("haptic-diagnostics.json"), options: .atomic)
+        }
+    }
     func configure(duration: Int) {
-        let value = min(30, max(0, duration))
-        if self.duration != value { player = nil }
-        self.duration = value
-        if value == 0 { engine?.stop(completionHandler: nil) }
-        else if active { prepare() }
+        self.duration = min(250, max(0, duration))
+        if duration == 0 {
+            try? player?.cancel()
+            player = nil
+        } else if active { _ = prepare() }
+    }
+    private func prepare() -> CHHapticEngine? {
+        guard supported, active, duration > 0 else { return nil }
+        do {
+            if engine == nil {
+                let created = try CHHapticEngine()
+                created.playsHapticsOnly = true
+                created.isMutedForHaptics = false
+                created.isAutoShutdownEnabled = false
+                created.stoppedHandler = { [weak self, weak created] reason in
+                    DispatchQueue.main.async {
+                        guard let self, let created, self.engine === created else { return }
+                        self.engineRunning = false
+                        self.player = nil
+                        self.record("engine stopped: \(reason.rawValue)")
+                    }
+                }
+                created.resetHandler = { [weak self, weak created] in
+                    DispatchQueue.main.async {
+                        guard let self, let created, self.engine === created else { return }
+                        self.engineRunning = false
+                        self.player = nil
+                        _ = self.prepare()
+                    }
+                }
+                engine = created
+            }
+            guard let engine else { return nil }
+            if !engineRunning {
+                try engine.start()
+                engineRunning = true
+            }
+            return engine
+        } catch {
+            engineRunning = false
+            lastError = String(describing: error)
+            record("engine start failed")
+            return nil
+        }
     }
     func resume(duration: Int) {
         active = true
         configure(duration: duration)
+        if ProcessInfo.processInfo.arguments.contains("--haptic-log") {
+            do {
+                verifiedDurations = try (1...250).map { try Self.pattern(milliseconds: $0)!.duration * 1000 }
+                record("all slider durations validated on this device")
+            } catch { lastError = String(describing: error); record("device duration validation failed") }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--haptic-diagnostics"), !diagnosticStarted {
+            diagnosticStarted = true
+            for delay in [0.5, 0.8, 1.1, 1.6] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.play() }
+            }
+        }
     }
     func pause() {
         active = false
-        engine?.stop(completionHandler: nil)
-    }
-    private func prepare() {
-        guard active, duration > 0, supported else { return }
-        do {
-            if engine == nil {
-                let engine = try CHHapticEngine()
-                engine.playsHapticsOnly = true
-                engine.isAutoShutdownEnabled = true
-                engine.resetHandler = { [weak self] in
-                    DispatchQueue.main.async {
-                        self?.player = nil
-                        self?.prepare()
-                    }
-                }
-                self.engine = engine
-            }
-            guard let engine else { return }
-            try engine.start()
-            if player == nil {
-                let event = CHHapticEvent(eventType: .hapticContinuous, parameters: [
-                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
-                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
-                ], relativeTime: 0, duration: Double(duration) / 1000)
-                player = try engine.makePlayer(with: CHHapticPattern(events: [event], parameters: []))
-            }
-        } catch {
-            // Haptics are optional; unavailable hardware or an interruption must
-            // never prevent a calculator key from reaching the emulator.
-            player = nil
-        }
+        player = nil
+        engineRunning = false
+        // Detach first: a delayed stop callback from this engine must not
+        // invalidate the replacement created on the next foreground session.
+        let stopped = engine
+        engine = nil
+        stopped?.stop(completionHandler: nil)
     }
     func play() {
         guard active, duration > 0 else { return }
         requests += 1
-        guard supported else { return }
-        prepare()
+        guard let engine = prepare() else { return }
         do {
-            // Restart instead of stacking vibrations when keys are pressed quickly.
-            try? player?.stop(atTime: CHHapticTimeImmediate)
-            try player?.start(atTime: CHHapticTimeImmediate)
-        } catch { player = nil }
+            guard let pattern = try Self.pattern(milliseconds: duration) else { return }
+            let fresh = try engine.makePlayer(with: pattern)
+            fresh.isMuted = false
+            // Never stop/restart a shared player at the same timestamp.
+            // Each inexpensive player runs its finite pulse to completion.
+            try fresh.start(atTime: CHHapticTimeImmediate)
+            player = fresh
+            lastPatternDuration = pattern.duration
+            successfulStarts += 1
+            lastError = ""
+            record("timed pulse started")
+        } catch {
+            lastError = String(describing: error)
+            record("timed pulse failed")
+        }
     }
 }
 
@@ -787,14 +888,14 @@ final class CalculatorSettings {
         if testing && ProcessInfo.processInfo.arguments.contains("--reset-settings") {
             defaults.removePersistentDomain(forName: "com.codybarton.graph89.settings-tests")
         }
-        defaults.register(defaults: ["graphCursorSpeed": 3, "cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 8])
+        defaults.register(defaults: ["graphCursorSpeed": 3, "cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 30])
         graphCursorSpeed = min(10, max(1, defaults.integer(forKey: "graphCursorSpeed")))
         hdPlot = defaults.bool(forKey:"hdPlot")
         sharpText = defaults.bool(forKey: "sharpText")
         compactLayout = defaults.bool(forKey: "compactLayout") && sharpText
         cpuPercent = min(250, max(30, defaults.integer(forKey: "cpuPercent")))
         overclock = defaults.bool(forKey: "overclockWhenBusy")
-        hapticDuration = min(30, max(0, defaults.integer(forKey: "hapticDuration")))
+        hapticDuration = min(250, max(0, defaults.integer(forKey: "hapticDuration")))
         stretchMode = StretchMode(rawValue: defaults.string(forKey: "stretchMode") ?? "") ?? .safeAspect
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") { hdPlot = true }
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-sharp-text") { sharpText = true }
@@ -931,12 +1032,12 @@ final class ConfigurationController: UIViewController {
         hapticRow.distribution = .fillEqually
         stack.addArrangedSubview(hapticRow)
         hapticSlider.minimumValue = 0
-        hapticSlider.maximumValue = 30
+        hapticSlider.maximumValue = 250
         hapticSlider.accessibilityLabel = "Haptic Feedback"
         hapticSlider.addTarget(self, action: #selector(hapticChanged), for: .valueChanged)
         stack.addArrangedSubview(hapticSlider)
         let hapticDetail = UILabel()
-        hapticDetail.text = "One vibration per calculator key press. Duration: 0–30 ms; 0 disables feedback. Default: 8 ms. Requires a device with haptic hardware."
+        hapticDetail.text = "One vibration per key press. Duration: 0–250 ms; 0 disables feedback. Default: 30 ms. Requires haptic hardware."
         hapticDetail.font = .preferredFont(forTextStyle: .subheadline)
         hapticDetail.textColor = .secondaryLabel
         hapticDetail.numberOfLines = 0
@@ -1059,7 +1160,7 @@ final class ConfigurationController: UIViewController {
         settings.cpuPercent = 100
         settings.overclock = true
         settings.stretchMode = .safeAspect
-        settings.hapticDuration = 8
+        settings.hapticDuration = 30
         updateControls()
         onChange?()
     }

@@ -1,0 +1,27 @@
+# Transition visual exploration
+
+Run `python3 tools/visual-stress/run.py TI89Titanium_OS.89u --output build/visual-stress/verified` on this Mac. The ROM and calculator sessions stay in ignored output; no app/device state is read or changed.
+
+The harness explores Home math and history, all Home F menus, Catalog scrolling and letter jumps, Mode, Var Link, Math categories and submenus, an error dialog, Y= lists, window editors, all six graph modes, graph zoom/math menus, Trace, Intersection, and tables. It validates the native graph-mode variable after every mode switch. Input queues drain before subsequent operations. Every action is recorded in `actions.txt` with its key or exact TI-byte input.
+
+Frames are sampled every 20,000 native CPU iterations, with up to 48 changed intermediate frames per action plus its settled screen. A diagnostic-only instruction observer records unfinished text calls independently of the production retained layer. Each frame contains original LCD pixels, retained packets, active drawing calls, and, when present, the actual HD curve/decoration/mask payload. No diagnostic observer ships in either app.
+
+Build the host viewer with `xcrun swiftc -O ios/App/SharpTextRecognizer.swift tools/visual-stress/Analyze.swift -o build/visual-stress/analyze`. Run it with capture-directory, preview-directory, and `app/src/main/assets/fonts/Graph89HD.ttf` arguments. It uses the production Swift recognition and the approved CoreText outlines, including copied graph-layer clipping/drawing. Previews show Sharp Text and HD plotting; compact layout receives separate simulator and parity checks. The tool flags fallback cells intruding into unfinished native calls, overlapping replacement cells, and missing approved outline paths. Such flags are candidates for visual review, not automatic proof of corruption.
+
+Regressions include `android/tests/sharp-text.sh` and `tools/drawing-trace/merge-parity.py CAPTURES CAPTURES/fonts.bin`. Both platform parity drivers accept `@FILE` input lists, preserving temporal cache continuity across thousands of frames without exceeding shell argument limits.
+
+## Reproduced cleanup
+
+Partial menu labels, status text, and toolbar updates could briefly match unrelated bitmap glyphs, including dots, quotes and letters. Native packet 14 now reserves the clipped area of an unfinished glyph without erasing or replacing its original pixels. Both recognizers also reserve complete native glyph cells even when the character has no approved vector outline. This prevents lookalike fallback from modifying unsupported symbols. Additional shape detection respects these regions too. HD graph readout masks include unfinished text cells.
+
+The paired exploration covered 595 actions and 4,811 intermediate/settled frames. An extended 596-action, 4,852-frame pass also waits for every graph to finish and uses actual 2nd/F-key chords for auxiliary menus. Seven pre-fix unfinished-call intrusions became zero after the fix. Android/Swift replacement decisions matched on all 4,811 frames. All 595 settled original LCD screens stayed byte-identical. No font outlines changed. Bitmap-only UI markers, unapproved characters, disabled text and native redraw fragments remain original rather than receiving guessed artwork.
+
+Selection inversion, clipped bitmap restores, and scrolling are tracked until the native raster call returns. Incomplete operations cannot prune drawing identities. Drawing ownership also ends in saved bitmap metadata, avoiding stale unfinished-glyph reservations after restoration. The known editor cursor XOR is normalized by its existing row-wise logic and does not reserve adjacent fallback text. Raster reservations respect the guest clip rectangle.
+
+Simulator verification covers graph Intersection prompts, polar Trace, compact Home history and toggling, compact Y= lists and toggling, clipped 3D navigation, inverted clipped tall math, and cursor blinking. No pacing delays were added and no calculator expressions/settings were changed by the visual fixes.
+
+Sharp disabled text validation: `python3 tools/visual-stress/check-disabled.py CAPTURES --original ORIGINAL_CAPTURES` checks A_SHADED packets against real ROM font rows using the ROM's alternating 0xA5/0x5A LCD-byte masks, permits only validated cursor padding, and checks original LCD bytes remain identical. Retained merge parity includes disabled style as an eighth output field. Production renderers use half-contrast approved outlines; the shaded raster remains the identity validator. No new font outline is required.
+
+Missing-symbol proposals can be regenerated with the bundled Pillow runtime using `android/sharp-text/preview-remaining-symbols.py LOCAL_FONTS_BIN`. This writes comparison sheets only into ignored build output; it does not edit font assets, recognizer mappings, or production artwork. New designs require the user's approval before integration.
+
+For exact LCM-error recovery, run `run.py ROM --scenario errors --output OUTPUT`, then `check-lcm-recovery.py OUTPUT --original ORIGINAL_OUTPUT`. Use `--native-original` for the reference run with retained hooks disabled. The checker verifies five real error dialogs, no compact rendering over a dialog, unchanged completed expression primitives after ten dismiss/clear operations, and identical native Home pixels throughout. The host viewer's `--compact` option draws the production compact renderer for visual inspection.

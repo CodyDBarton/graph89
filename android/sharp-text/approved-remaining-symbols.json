@@ -1,0 +1,98 @@
+[
+  {
+    "code": 11,
+    "label": "Return arrow",
+    "approval": "approved",
+    "design": "Return arrow revision 2"
+  },
+  {
+    "code": 14,
+    "label": "Locked marker",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 15,
+    "label": "Check mark",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 16,
+    "label": "Square marker",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 17,
+    "label": "Left triangle",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 19,
+    "label": "Up triangle",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 20,
+    "label": "Down triangle",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 21,
+    "label": "Left arrow",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 23,
+    "label": "Up arrow",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 24,
+    "label": "Down arrow",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 25,
+    "label": "Large left triangle",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 26,
+    "label": "Large right triangle",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 27,
+    "label": "Shift marker",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 127,
+    "label": "Diamond marker",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 173,
+    "label": "Raised minus",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  },
+  {
+    "code": 181,
+    "label": "Mu",
+    "approval": "approved",
+    "design": "Remaining-symbol comparison"
+  }
+]

@@ -15,9 +15,10 @@ for p in sorted(frames.glob('*.pgm')):
     base.with_suffix('.packets').write_text(' '.join(str(x) for cell in cells for x in cell))
 java=Path('/opt/homebrew/opt/openjdk@11/libexec/openjdk.jdk/Contents/Home/bin')
 subprocess.run([str(java/'javac'),'-d',str(out),str(root/'app/src/main/java/com/graph89/emulationcore/SharpTextRecognizer.java'),str(root/'android/tests/RetainedTextParity.java')],check=True)
-subprocess.run(['xcrun','swiftc','-O',str(root/'ios/App/SharpTextRecognizer.swift'),str(root/'ios/tests/RetainedTextParity.swift'),'-o',str(out/'swift-merge')],check=True)
-a=subprocess.check_output([str(java/'java'),'-cp',str(out),'RetainedTextParity',str(fonts),*bases],text=True).splitlines()
-b=subprocess.check_output([str(out/'swift-merge'),str(fonts),*bases],text=True).splitlines()
+subprocess.run(['xcrun','swiftc','-O','-O',str(root/'ios/App/SharpTextRecognizer.swift'),str(root/'ios/tests/RetainedTextParity.swift'),'-o',str(out/'swift-merge')],check=True)
+listing=out/'inputs.txt';listing.write_text('\n'.join(bases)+'\n')
+a=subprocess.check_output([str(java/'java'),'-cp',str(out),'RetainedTextParity',str(fonts),'@'+str(listing)],text=True).splitlines()
+b=subprocess.check_output([str(out/'swift-merge'),str(fonts),'@'+str(listing)],text=True).splitlines()
 assert a==b,'Android/iOS retained merge mismatch'
 assert len(a)==len(bases)>0
 print(f'{len(a)} captured frames: retained identities and fallback merge identical on Android/iOS.')

@@ -36,11 +36,19 @@ final class Graph89UITests: XCTestCase {
         tap(app, "PLUS")
         tap(app, "K3")
         tap(app, "ENTER")
-        guard let actual = pixels(app), let url = Bundle(for: Self.self).url(forResource: "expected-five", withExtension: "pgm"),
+        guard let url = Bundle(for: Self.self).url(forResource: "expected-five", withExtension: "pgm"),
               let expectedPGM = try? Data(contentsOf: url) else {
             XCTFail("Missing display or native reference image"); return
         }
         let expected = Data(expectedPGM.suffix(16000))
+        let resultReady = NSPredicate { _, _ in
+            guard let actual = self.pixels(app), actual.count == 16000 else { return false }
+            return (70..<84).allSatisfy { y in
+                actual.subdata(in: (y*160+146)..<(y*160+160)) == expected.subdata(in: (y*160+146)..<(y*160+160))
+            }
+        }
+        expectation(for: resultReady, evaluatedWith: display); waitForExpectations(timeout: 10)
+        guard let actual = pixels(app) else { XCTFail("Missing final display"); return }
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -54,6 +62,27 @@ final class Graph89UITests: XCTestCase {
         for y in 70..<84 {
             XCTAssertEqual(actual.subdata(in: (y*160+146)..<(y*160+160)), expected.subdata(in: (y*160+146)..<(y*160+160)), "Result differs on row \(y)")
         }
+    }
+
+    func testRapidRepeatedTapsRemainDistinct() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test", "--reset-settings", "--fresh-session"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout: 15))
+        tap(app, "HOME"); tap(app, "CLEAR")
+        for _ in 0..<6 { app.buttons["K1"].tap(withNumberOfTaps: 2, numberOfTouches: 1) }
+        let complete = NSPredicate { _, _ in
+            guard let bytes = self.pixels(app), bytes.count == 16000 else { return false }
+            let first = (84..<94).flatMap { y in (0..<6).map { bytes[y*160+$0] } }
+            guard first.contains(30) else { return false }
+            return (1..<12).allSatisfy { cell in
+                (84..<94).flatMap { y in (0..<6).map { bytes[y*160+cell*6+$0] } } == first
+            }
+        }
+        expectation(for: complete, evaluatedWith: app.images["Calculator display"])
+        waitForExpectations(timeout: 10)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Twelve distinct rapid taps"; attachment.lifetime = .keepAlways; add(attachment)
     }
 
     func testSharpTextTogglePersistsAndPreservesCalculator() {
@@ -478,6 +507,49 @@ final class Graph89UITests: XCTestCase {
         let b=XCTAttachment(screenshot:app.screenshot());b.name="Original Y rows after scrolling";b.lifetime = .keepAlways;add(b)
     }
 
+    func testCompactHistorySurvivesTooManyArguments() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-compact-layout","--ui-test-lcm-error"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        let overlay=app.otherElements["Sharp text rendering"]
+        let error=NSPredicate { _,_ in (overlay.value as? String ?? "").contains("lcmError:1") }
+        expectation(for:error,evaluatedWith:overlay);waitForExpectations(timeout:30)
+        let dialog=XCTAttachment(screenshot:app.screenshot());dialog.name="LCM too many arguments";dialog.lifetime = .keepAlways;add(dialog)
+        tap(app,"ESC")
+        func historyReady()->Bool {(overlay.value as? String ?? "").contains("history:1")}
+        let history=NSPredicate { _,_ in historyReady() }
+        expectation(for:history,evaluatedWith:overlay);waitForExpectations(timeout:10)
+        XCTAssertTrue((overlay.value as? String ?? "").contains("foreignChildren:0"),"Status/entry glyphs must not enlarge a retained mathematical expression")
+        let restored=XCTAttachment(screenshot:app.screenshot());restored.name="Compact history restored after LCM error";restored.lifetime = .keepAlways;add(restored)
+        tap(app,"CLEAR");tap(app,"UP")
+        expectation(for:history,evaluatedWith:overlay);waitForExpectations(timeout:10)
+        let selected=XCTAttachment(screenshot:app.screenshot());selected.name="Recovered compact history selection";selected.lifetime = .keepAlways;add(selected)
+    }
+
+    func testSharpDisabledLabels() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-disabled"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        for key in ["HOME","CLEAR","K2","PLUS","K3","ENTER","UP"] { tap(app,key) }
+        let overlay=app.otherElements["Sharp text rendering"]
+        let shaded=NSPredicate { _,_ in
+            let value=overlay.value as? String ?? ""
+            let suffix=(value.components(separatedBy:"shaded:").last ?? "0").components(separatedBy:";").first ?? "0"
+            return (Int(suffix) ?? 0)>=15
+        }
+        expectation(for:shaded,evaluatedWith:overlay);waitForExpectations(timeout:10)
+        let shot=XCTAttachment(screenshot:app.screenshot());shot.name="Sharp disabled Home toolbar";shot.lifetime = .keepAlways;add(shot)
+        tap(app,"ESC");tap(app,"F1")
+        let disabledMenu=NSPredicate { _,_ in
+            let value=overlay.value as? String ?? ""
+            return value.contains("Open") && value.contains("New")
+        }
+        expectation(for:disabledMenu,evaluatedWith:overlay);waitForExpectations(timeout:10)
+        let menu=XCTAttachment(screenshot:app.screenshot());menu.name="Sharp disabled Tools entries";menu.lifetime = .keepAlways;add(menu)
+    }
+
     func testSharpCursorBlink() {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-cursor"]
@@ -618,14 +690,14 @@ final class Graph89UITests: XCTestCase {
             slider.adjust(toNormalizedSliderPosition: high ? 1 : 0)
             let label = app.staticTexts["Haptic duration value"].label
             let current = Double(label.split(separator: " ").first ?? "0") ?? 0
-            slider.coordinate(withNormalizedOffset: CGVector(dx: current / 30, dy: 0.5))
+            slider.coordinate(withNormalizedOffset: CGVector(dx: current / 250, dy: 0.5))
                 .press(forDuration: 0.1, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: high ? 1.15 : -0.15, dy: 0.5)))
         }
         app.buttons["HOME"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1)
         Thread.sleep(forTimeInterval: 0.2)
         XCTAssertEqual(requests(), "1", "Holding and releasing a key must produce only one haptic request")
         openHaptics()
-        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "8 ms")
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "30 ms")
         endpoint(false)
         XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "Disabled")
         tap(app, "Done")
@@ -634,7 +706,7 @@ final class Graph89UITests: XCTestCase {
         XCTAssertEqual(requests(), "1", "Disabled haptics must not request a vibration")
         openHaptics()
         endpoint(true)
-        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "30 ms")
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "250 ms")
         tap(app, "Done")
         app.terminate()
         app.launchArguments = ["--ui-test"]
@@ -644,9 +716,9 @@ final class Graph89UITests: XCTestCase {
         tap(app, "HOME")
         XCTAssertEqual(requests(), "1")
         openHaptics()
-        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "30 ms")
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "250 ms")
         tap(app, "Restore Defaults")
-        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "8 ms")
+        XCTAssertEqual(app.staticTexts["Haptic duration value"].label, "30 ms")
         tap(app, "Done")
     }
 

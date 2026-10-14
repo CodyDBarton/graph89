@@ -30,6 +30,39 @@ public final class SharpTextRecognizerTest {
         SharpTextRecognizer r = new SharpTextRecognizer(fonts);
         boolean[] pixels = new boolean[WIDTH * HEIGHT];
         draw(pixels, 10, 20, A, false); draw(pixels, 16, 20, B, false);
+        List<SharpTextRecognizer.Cell> fallback = r.recognize(pixels, WIDTH, HEIGHT);
+        int[] pending = {10,20,14,0,0,6,8,0,10,20,16,28};
+        List<SharpTextRecognizer.Cell> reserved = r.retained(pending,fallback);
+        check(reserved.size()==1 && reserved.get(0).glyph.character=='B', "An unfinished native cell must suppress fragment guesses, not its neighbour");
+        check(r.retained(pending,java.util.Collections.<SharpTextRecognizer.Cell>emptyList()).isEmpty(),"Reservations must never become artwork");
+        int[] unsupported = {10,20,1,17,0,6,8,1,0,0,160,100};
+        check(r.retained(unsupported,fallback).size()==1,"Unsupported native symbols must retain their raster instead of becoming lookalike letters");
+        int[] outside = {10,20,14,0,0,6,8,0,16,20,20,28};
+        check(r.retained(outside,fallback).size()==2,"An empty clipped reservation must not hide text");
+        int[] completed = {10,20,1,65,0,6,8,1,0,0,160,100};
+        check(r.retained(completed,fallback).size()==2,"A completed native character must become sharp immediately");
+        int[] disabled = {10,20,1,65,0,6,8,3,0,0,160,100};
+        List<SharpTextRecognizer.Cell> shaded=r.retained(disabled,fallback);
+        check(shaded.size()==2 && shaded.get(0).shaded && shaded.get(0).glyph.character=='A',"Validated disabled labels retain approved identity and shaded style");
+        check(!shaded.get(1).shaded,"Disabled style must not leak into neighbouring ordinary text");
+        disabled[4]=1;
+        check(r.retained(disabled,fallback).get(0).inverse && r.retained(disabled,fallback).get(0).shaded,"Disabled selection preserves inversion and shaded style together");
+        System.out.println("Native regions: unfinished glyphs, unsupported symbols, clipped reservations and completion passed.");
+        int[] symbolCodes={11,14,15,16,17,19,20,21,23,24,25,26,27,127,173,181};
+        byte[] symbolFonts=new byte[3*256*12];
+        for(int f=0;f<3;f++)for(int code:symbolCodes) {
+            int off=(f*256+code)*12;symbolFonts[off]=6;symbolFonts[off+1]=8;
+            for(int y=0;y<8;y++)symbolFonts[off+2+y]=(byte)(A[y]<<2);
+        }
+        SharpTextRecognizer symbols=new SharpTextRecognizer(symbolFonts);
+        boolean[] graphic=new boolean[WIDTH*HEIGHT];draw(graphic,10,20,A,false);draw(graphic,16,20,A,false);
+        check(symbols.recognize(graphic,WIDTH,HEIGHT).isEmpty(),"New UI symbols must never be guessed from arbitrary matching graphics");
+        for(int f=0;f<3;f++)for(int code:symbolCodes)for(int inv=0;inv<2;inv++) {
+            int[] packet={10,20,f,code,inv,6,8,1,0,0,160,100};
+            List<SharpTextRecognizer.Cell> nativeCells=symbols.retained(packet,java.util.Collections.<SharpTextRecognizer.Cell>emptyList());
+            check(nativeCells.size()==1 && nativeCells.get(0).glyph.character==0xe100+code && nativeCells.get(0).inverse==(inv!=0),"Approved size-specific symbols need native identity, both polarities and every font size");
+        }
+        System.out.println("Sixteen newly approved symbols: native identity in all sizes/polarities; graphics-lookalike rejection passed.");
         // Nearby arbitrary graphics must not become text.
         for (int y = 50; y < 58; ++y) for (int x = 100; x < 120; ++x) pixels[y * WIDTH + x] = true;
         pair(r, pixels, 10, 20, false);

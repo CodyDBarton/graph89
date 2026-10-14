@@ -51,7 +51,7 @@ static uint8_t trace_toolbar[480];static int trace_toolbar_valid,trace_mode,trac
 static int trace_repeating;
 static int previous_x,previous_y,previous_size;
 int graph89_trace_repeat_factor=3;
-static uint32_t hold_counter,hold_decrement[4];static int hold_sites;
+static uint32_t hold_counter,hold_initial,hold_decrement[4];static int hold_sites;
 static int graph_cursor_context,held_arrow=-1,hold_started_repeat;
 static double held_since;
 #if defined(GRAPH89_DRAW_TRACE) || defined(GRAPH89_TEST_CLOCK)
@@ -158,6 +158,7 @@ static void initialize(void) {
  uint32_t delay=rom_call(0x248),initial=0;
  if(word_at(delay)==0x7200 && word_at(delay+2)==0x322f && word_at(delay+4)==4 && word_at(delay+6)==0x3039 && word_at(delay+12)==0x33c1 && long_at(delay+8)==long_at(delay+14) && word_at(delay+18)==0x4e75)initial=long_at(delay+8);
  if(initial && initial+2<tihw.ram_size){
+  hold_initial=initial;
   for(uint32_t q=tihw.rom_base;q+10<tihw.rom_base+tihw.rom_size;q+=2)
    if(word_at(q)==0x33f9 && long_at(q+2)==initial){uint32_t counter=long_at(q+6);if(counter+2<tihw.ram_size){hold_counter=counter;break;}}
   for(uint32_t q=tihw.rom_base;hold_counter && q+6<tihw.rom_base+tihw.rom_size;q+=2)
@@ -499,6 +500,13 @@ void hdplot_key_event(int key,int pressed){
  int arrow=key==TIKEY_LEFT || key==TIKEY_RIGHT || key==TIKEY_UP || key==TIKEY_DOWN;
  if(!arrow && pressed){graph_cursor_context=0;trace_mode=0;trace_requested=key==TIKEY_F3 && !ti68k_kbd_is_key_pressed(TIKEY_DIAMOND) && !ti68k_kbd_is_key_pressed(TIKEY_2ND) && !ti68k_kbd_is_key_pressed(TIKEY_SHIFT);}
  if(arrow && pressed && held_arrow!=key){held_arrow=key;held_since=cursor_time();hold_started_repeat=0;}
+ /* The ROM can still have the old arrow latched until its next matrix scan.
+    Leaving our shortened countdown at 1 or 2 on release can create a ghost
+    repeat before that scan. Restore the native delay, not its global setting. */
+ if(arrow && !pressed && held_arrow==key && hold_counter && hold_initial){
+  unsigned delay=word_at(hold_initial);
+  tihw.ram[hold_counter]=delay>>8;tihw.ram[hold_counter+1]=delay;
+ }
  if((arrow && !pressed && held_arrow==key) || (!arrow && pressed)){held_arrow=-1;hold_started_repeat=0;}
  if(!arrow || !pressed)trace_repeating=0;
 }
@@ -529,7 +537,7 @@ void hdplot_enable(int on,int samples){pthread_mutex_lock(&lock);
  if(!eval_active)factor=samples;
  if(enabled!=(on!=0)){enabled=on!=0;if(!(enabled&&loaded_cache)){complete=0;if(!eval_active){count=0;building=0;have_last=0;}}loaded_cache=0;}
  hdplot_active=1;pthread_mutex_unlock(&lock);}
-void hdplot_reset(void){pthread_mutex_lock(&lock);ready=supported=count=building=complete=overflow=have_last=eval_active=loaded_cache=0;cursor_known=label_pending=navigation_cursor=navigation_label=0;eval_mode=plot_mode=1;curve_call=curve_xptr=param_site=polar_site=0;mesh_project=mesh_heap_slot=mesh_clear_return=mesh_pending=mesh_projected=mesh_override=mesh_finished=mesh_scene_return=mesh_scene_sp=mesh_discard=mesh_clean_base=mesh_root_return=mesh_root_sp=graph_clear_site=mesh_draw_clear_site=mesh_axis_sp=mesh_axis_return=0;mesh_axes_call[0]=mesh_axes_call[1]=mesh_axes_call[2]=0;ode_override=ode_recovered=ode_grid=ode_return=ode_sp=field_site=field_return=field_sp=field_count=0;memset(labels,0,sizeof labels);memset(prompt_glyphs,0,sizeof prompt_glyphs);prompt_pending=0;trace_toolbar_valid=trace_mode=trace_requested=trace_repeating=previous_size=0;graph_cursor_context=hold_sites=hold_counter=hold_started_repeat=0;held_arrow=-1;finish_site=0;axes_capturing=decoration_count=decoration_bad=0;axes_return=port_slot=axes_call=line_call=pix_call=0;memset(decoration_mask,0,sizeof decoration_mask);memset(hdplot_pages,0,sizeof hdplot_pages);hdplot_active=1;pthread_mutex_unlock(&lock);}
+void hdplot_reset(void){pthread_mutex_lock(&lock);ready=supported=count=building=complete=overflow=have_last=eval_active=loaded_cache=0;cursor_known=label_pending=navigation_cursor=navigation_label=0;eval_mode=plot_mode=1;curve_call=curve_xptr=param_site=polar_site=0;mesh_project=mesh_heap_slot=mesh_clear_return=mesh_pending=mesh_projected=mesh_override=mesh_finished=mesh_scene_return=mesh_scene_sp=mesh_discard=mesh_clean_base=mesh_root_return=mesh_root_sp=graph_clear_site=mesh_draw_clear_site=mesh_axis_sp=mesh_axis_return=0;mesh_axes_call[0]=mesh_axes_call[1]=mesh_axes_call[2]=0;ode_override=ode_recovered=ode_grid=ode_return=ode_sp=field_site=field_return=field_sp=field_count=0;memset(labels,0,sizeof labels);memset(prompt_glyphs,0,sizeof prompt_glyphs);prompt_pending=0;trace_toolbar_valid=trace_mode=trace_requested=trace_repeating=previous_size=0;graph_cursor_context=hold_sites=hold_counter=hold_initial=hold_started_repeat=0;held_arrow=-1;finish_site=0;axes_capturing=decoration_count=decoration_bad=0;axes_return=port_slot=axes_call=line_call=pix_call=0;memset(decoration_mask,0,sizeof decoration_mask);memset(hdplot_pages,0,sizeof hdplot_pages);hdplot_active=1;pthread_mutex_unlock(&lock);}
 /* Keep calculator-owned cursors, coordinate readouts and popup menus above
    the cached vector scene. Bit 1 in the background marks native overlay pixels;
    renderers exclude these patches so the current LCD/text underneath remains
@@ -637,7 +645,7 @@ int hdplot_copy(const uint8_t *pixels,float *out,int capacity,uint8_t *backgroun
   if(valid){
    int32_t text[1024*12];int text_count=!live?hdtext_copy_locked(pixels,text,1024):0;
    for(int k=0;k<text_count;k++){
-    int32_t *t=text+k*12;if(t[2]<0||t[2]>2||t[1]<(plot_mode==5?64:70)||t[1]>=93)continue;
+    int32_t *t=text+k*12;if((t[2]<0 || (t[2]>2 && t[2]!=14)) || (t[2]==14 && t[7]<0) || t[1]<(plot_mode==5?64:70)||t[1]>=93)continue;
     int l=t[0]-1,r=t[0]+t[5],top=t[1],bottom=t[1]+t[6];
     if(l<t[8])l=t[8];if(r>t[10])r=t[10];if(top<t[9])top=t[9];if(bottom>t[11])bottom=t[11];
     if(l<0)l=0;if(r>159)r=159;if(top<16)top=16;if(bottom>93)bottom=93;

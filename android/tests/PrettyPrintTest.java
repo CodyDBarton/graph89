@@ -139,7 +139,7 @@ public final class PrettyPrintTest {
         int approvedCount=0;
         for(int code=0;code<256;++code) {
             char mapped=SharpTextRecognizer.specialCharacter(code);
-            if(mapped==0) continue;
+            if(mapped==0 || SharpTextRecognizer.sizedSymbol(code)) continue;
             ++approvedCount;
             int[] symbol={62,(code&31)<<1,((code>>>5)+1)<<1,34,42,34,62,0};
             font(1,(char)code,6,symbol);

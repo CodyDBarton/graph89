@@ -15,7 +15,7 @@
 
 typedef struct { int x,y,font,code,attr,left,top,right,bottom,w,h,pending; } Cell;
 typedef struct { uint32_t address; int count,cursor_x,cursor_valid; Cell cells[MAX_CELLS]; } Port;
-typedef struct { uint32_t address; int w,h,count; uint8_t bitmap[3840]; Cell cells[MAX_CELLS]; } Saved;
+typedef struct { uint32_t address; int w,h,count; uint8_t bitmap[3840]; Cell cells[MAX_CELLS]; struct CompactSnapshot *compact; } Saved;
 int hdtext_active;
 unsigned char hdtext_pages[65536];
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
@@ -26,8 +26,23 @@ static Saved saves[MAX_SAVES];
 typedef struct { uint32_t pc,sp,address;int left,right,y,font; } PendingText;
 static PendingText pending_text[16];
 static int pending_text_count;
+/* Selection inversion, scrolling, and bitmap restoration also rasterize over
+   multiple instructions. Their old identities must survive intermediate frames. */
+typedef struct {uint32_t pc,sp,address;int left,top,right,bottom;} PendingRaster;
+static PendingRaster pending_raster[16];static int pending_raster_count;
 typedef struct { int kind,x,y,x1,y1,font,code,w,h,attr; } Primitive;
 typedef struct { uint32_t return_pc;int count,complete,alignment,entry,selected,history;Primitive items[512]; } Expression;
+/* Dialog bitmaps carry the completed Home layout they temporarily cover.
+   Keep a bounded snapshot; validate the entire restored body before using it. */
+typedef struct CompactSnapshot {
+    uint8_t body[67*20];int count,marker_count;
+    Cell markers[32];int marker_entries[32];Expression expressions[];
+} CompactSnapshot;
+static int compact_restore=-1;
+static void clear_saves(void) {
+    for(int i=0;i<MAX_SAVES;i++)free(saves[i].compact);
+    memset(saves,0,sizeof saves);compact_restore=-1;
+}
 static Expression expressions[MAX_EXPRESSIONS];static int expression_next,expression_active=-1;
 static uint32_t editor,heap_slot,print_expr,clip_line,draw_pix,win_clear,te_calls[5];
 static int next_save, ready;
@@ -40,6 +55,32 @@ static uint32_t font_slot,port_slot,font_offsets[3];
 static uint32_t shape_sites[3],shape_finish,window_slot;
 static uint32_t draw_char,draw_clip,draw_str,bitmap_get,bitmap_put,scroll,shift,clear,rect_fill;
 
+static void save_compact(Saved *s) {
+    free(s->compact);s->compact=NULL;
+    if(!home_complete || home_capture || expression_active>=0)return;
+    int count=0;
+    for(int i=0;i<MAX_EXPRESSIONS;i++)if(expressions[i].history) {
+        if(expressions[i].complete!=1)return;
+        count++;
+    }
+    if(!count)return;
+    CompactSnapshot *c=calloc(1,sizeof *c+count*sizeof(Expression));if(!c)return;
+    c->count=count;c->marker_count=home_marker_count;
+    for(int y=0;y<67;y++)memcpy(c->body+y*20,tihw.ram+tihw.lcd_adr+(y+16)*30,20);
+    for(int i=0,k=0;i<MAX_EXPRESSIONS;i++)if(expressions[i].history)c->expressions[k++]=expressions[i];
+    memcpy(c->markers,home_markers,sizeof c->markers);memcpy(c->marker_entries,home_marker_entries,sizeof c->marker_entries);s->compact=c;
+}
+static void restore_compact(const uint8_t *pixels,int home) {
+    if(compact_restore<0 || pending_raster_count || home_capture)return;
+    CompactSnapshot *c=saves[compact_restore].compact;compact_restore=-1;
+    if(!c || !home)return;
+    for(int y=0;y<67;y++)for(int x=0;x<160;x++)
+        if(((c->body[y*20+x/8]>>(7-(x&7)))&1)!=(pixels[(y+16)*160+x]!=0))return;
+    memset(expressions,0,sizeof expressions);
+    memcpy(expressions,c->expressions,c->count*sizeof(Expression));expression_next=c->count;expression_active=-1;
+    home_complete=1;home_marker_count=c->marker_count;
+    memcpy(home_markers,c->markers,sizeof c->markers);memcpy(home_marker_entries,c->marker_entries,sizeof c->marker_entries);
+}
 static int byte_at(uint32_t a) {
     if(tihw.ram && a<tihw.ram_size) return tihw.ram[a];
     if(tihw.rom && a>=tihw.rom_base && a-tihw.rom_base<tihw.rom_size) return tihw.rom[a-tihw.rom_base];
@@ -206,22 +247,60 @@ static void finish_text(uint32_t pc) {
     for(int k=0;k<16;k++) {
         PendingText *t=pending_text+k;if(!t->pc)continue;
         if((pc!=t->pc || sp!=t->sp) && sp<=t->sp)continue;
-        Port *p=port_for(t->address,0);
-        if(p)for(int i=0;i<p->count;i++) {
-            Cell *c=p->cells+i;
-            if(c->font==t->font && c->y==t->y && c->x>=t->left && c->x<t->right)c->pending=0;
-        }
+        /* Bitmap saves may carry the same drawing identity at translated
+           coordinates. End its ownership there too, not just on the live port. */
+        for(int j=0;j<MAX_PORTS;j++)for(int i=0;i<ports[j].count;i++)if(ports[j].cells[i].pending==k+1)ports[j].cells[i].pending=0;
+        for(int j=0;j<MAX_SAVES;j++)for(int i=0;i<saves[j].count;i++)if(saves[j].cells[i].pending==k+1)saves[j].cells[i].pending=0;
         t->pc=0;pending_text_count--;
     }
+}
+static void begin_raster(Port *p,int left,int top,int right,int bottom) {
+    if(!p || left>=right || top>=bottom)return;
+    uint32_t sp=m68k_areg(regs,7),pc=long_at(sp);
+    if(!pc || sp+4>tihw.ram_size)return;
+    for(int i=0;i<16;i++)if(!pending_raster[i].pc) {
+        pending_raster[i]=(PendingRaster){pc,sp+4,p->address,left,top,right,bottom};
+        pending_raster_count++;watch(pc);return;
+    }
+}
+static void begin_clipped_raster(Port *p,int left,int top,int right,int bottom,uint32_t clip) {
+    if(clip){int l=byte_at(clip),t=byte_at(clip+1),r=byte_at(clip+2),b=byte_at(clip+3);
+        if(l>=0 && t>=0 && r>=l && b>=t && r<240 && b<128){
+            if(left<l)left=l;if(top<t)top=t;if(right>r+1)right=r+1;if(bottom>b+1)bottom=b+1;
+        }
+    }
+    begin_raster(p,left,top,right,bottom);
+}
+static void finish_raster(uint32_t pc) {
+    if(!pending_raster_count)return;uint32_t sp=m68k_areg(regs,7);
+    for(int i=0;i<16;i++){PendingRaster *r=pending_raster+i;if(!r->pc)continue;
+        if((pc==r->pc && sp==r->sp) || sp>r->sp){r->pc=0;pending_raster_count--;}
+    }
+}
+static int raster_contains(Port *p,Cell c) {
+    if(!pending_raster_count)return 0;
+    int left=c.x+(c.font<2),right=left+c.w,top=c.y,bottom=top+c.h;
+    if(left<c.left)left=c.left;if(right>c.right)right=c.right;
+    if(top<c.top)top=c.top;if(bottom>c.bottom)bottom=c.bottom;
+    for(int i=0;i<16;i++){PendingRaster *r=pending_raster+i;
+        if(r->pc && r->address==p->address && left<r->right && r->left<right && top<r->bottom && r->top<bottom)return 1;
+    }
+    return 0;
 }
 static void remember_primitive(Primitive item) {
     if(expression_active>=0) {
         Expression *e=&expressions[expression_active];
+        /* Keyboard/status interrupts may draw the Alpha annunciator while
+           Print2DExpr is still on the stack. Home captures extend upward only;
+           the entry/status rows are never mathematical children. Including
+           their glyphs falsely makes a fraction 80 units tall and repacks it
+           over later answers. Y= deliberately captures extra rows below 83. */
+        if(e->alignment && (item.kind ? (item.y<item.y1?item.y:item.y1):item.y)>=83)return;
         if(e->count<512)e->items[e->count++]=item;else e->complete=-1;
     }
 }
 void hdtext_observe(uint32_t pc) {
-    finish_text(pc);
+    finish_text(pc);finish_raster(pc);
     if(!font_slot || !port_slot || !font_offsets[0])return;
     int font=byte_at(font_slot);if(font<0 || font>2)return;
     uint32_t address=long_at(port_slot),a=m68k_areg(regs,7)+4;
@@ -230,7 +309,8 @@ void hdtext_observe(uint32_t pc) {
         uint32_t win=m68k_areg(regs,3);
         home_capture=win+28<tihw.ram_size && byte_at(win+16)==0 && byte_at(win+17)==16
             && byte_at(win+18)==159 && byte_at(win+19)==82 && m68k_dreg(regs,6)==66;
-        home_complete=0;home_marker_count=0;home_entry=0;
+        home_complete=0;home_marker_count=0;home_entry=0;compact_restore=-1;
+        if(home_capture){memset(expressions,0,sizeof expressions);expression_next=0;expression_active=-1;}
         if(home_capture)m68k_dreg(regs,3)+=134;
     }
     if(pc==home_record && home_capture)home_entry++;
@@ -284,7 +364,8 @@ void hdtext_observe(uint32_t pc) {
     }
     if(pc==draw_pix && expression_active>=0)remember_primitive((Primitive){.kind=1,.x=(short)word_at(a),.y=(short)word_at(a+2),.x1=(short)word_at(a),.y1=(short)word_at(a+2),.attr=(short)word_at(a+4)});
     if(shape_finish && pc==shape_finish) {
-        for(int i=0;i<p->count;i++)p->cells[i].pending=0;
+        for(int j=0;j<MAX_PORTS;j++)for(int i=0;i<ports[j].count;i++)if(ports[j].cells[i].pending==17)ports[j].cells[i].pending=0;
+        for(int j=0;j<MAX_SAVES;j++)for(int i=0;i<saves[j].count;i++)if(saves[j].cells[i].pending==17)saves[j].cells[i].pending=0;
         return;
     }
     for(int k=0;k<3;k++)if(shape_sites[k] && pc==shape_sites[k]) {
@@ -294,16 +375,20 @@ void hdtext_observe(uint32_t pc) {
         int x=(short)m68k_dreg(regs,3),y=(short)m68k_dreg(regs,4);
         if(k==0){x-=2;y-=h-2;}else {y-=2;}
         x+=byte_at(win+16);y+=byte_at(win+17);
-        Cell c={x,y,3,k==0?189:k==1?40:41,1,byte_at(win+24),byte_at(win+25),byte_at(win+26)+1,byte_at(win+27)+1,k==0?5:3,h,1};
+        Cell c={x,y,3,k==0?189:k==1?40:41,1,byte_at(win+24),byte_at(win+25),byte_at(win+26)+1,byte_at(win+27)+1,k==0?5:3,h,17};
         if(h>512 && expression_active>=0)expressions[expression_active].complete=-1;
         if(h>=7 && h<=512){remember_primitive((Primitive){.x=c.x,.y=c.y,.font=3,.code=c.code,.w=c.w,.h=c.h,.attr=c.attr});insert(p,c);}return;
     }
     if(pc==rect_fill) {
         uint32_t r=long_at(a);int x=byte_at(r),y=byte_at(r+1),right=byte_at(r+2),bottom=byte_at(r+3),attr=(short)word_at(a+8);
+        int cursor=font==1 && address==tihw.lcd_adr && y==85 && bottom==92 && right==x+1 && x%6==0 && x+1<160 && attr==2;
         if(y<=92 && bottom>=85) {
-            p->cursor_valid=font==1 && address==tihw.lcd_adr && y==85 && bottom==92 && right==x+1 && x%6==0 && x+1<160 && attr==2;
+            p->cursor_valid=cursor;
             if(p->cursor_valid)p->cursor_x=x;
         }
+        /* Cursor XOR is already normalized row by row below. Reserving its
+           padding would downgrade adjacent fallback text during every blink. */
+        if(!cursor)begin_clipped_raster(p,x,y,right+1,bottom+1,long_at(a+4));
         return;
     }
     if(pc==draw_char || pc==draw_clip) {
@@ -318,23 +403,25 @@ void hdtext_observe(uint32_t pc) {
         if(home_capture && expression_active<0 && address==tihw.lcd_adr && c.x<6 && c.code==16 && home_marker_count<32) {
             home_markers[home_marker_count]=c;home_marker_entries[home_marker_count++]=home_entry;
         }
-        c.pending=begin_text(p,c.x,c.y,c.font,c.x+c.w)>=0;
+        int owner=begin_text(p,c.x,c.y,c.font,c.x+c.w);c.pending=owner>=0?owner+1:0;
         insert(p,c);
     } else if(pc==draw_str) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+8);uint32_t s=long_at(a+4);
         int pending=begin_text(p,x,y,font,x);
         for(int i=0;i<256;i++) {
             int code=byte_at(s+i);if(code<=0)break;
-            Cell c=character(x,y,font,code,attr);c.pending=pending>=0;insert(p,c);x+=width_of(font,code);
+            Cell c=character(x,y,font,code,attr);c.pending=pending>=0?pending+1:0;insert(p,c);x+=width_of(font,code);
         }
         if(pending>=0)pending_text[pending].right=x;
     } else if(pc==clear) {
+        begin_raster(p,0,0,240,128);
         p->count=0;p->cursor_valid=0;
     } else if(pc==bitmap_get) {
         uint32_t r=long_at(a),buffer=long_at(a+4);int x=byte_at(r),y=byte_at(r+1),right=byte_at(r+2),bottom=byte_at(r+3);
         if(x<0 || y<0 || right<x || bottom<y || right>=240 || bottom>=128 || address!=tihw.lcd_adr)return;
         Saved *s=NULL;for(int i=0;i<MAX_SAVES;i++)if(saves[i].address==buffer){s=&saves[i];break;}
         if(!s)s=&saves[next_save++%MAX_SAVES];
+        save_compact(s);
         s->address=buffer;s->w=right-x+1;s->h=bottom-y+1;s->count=0;
         memset(s->bitmap,0,sizeof(s->bitmap));int stride=(s->w+7)/8;
         for(int row=0;row<s->h;row++)for(int column=0;column<s->w;column++) {
@@ -348,12 +435,16 @@ void hdtext_observe(uint32_t pc) {
         }
     } else if(pc==bitmap_put) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+12);uint32_t buffer=long_at(a+4);
+        int h=word_at(buffer),w=word_at(buffer+2);
+        if(w>0 && w<=240 && h>0 && h<=128)begin_clipped_raster(p,x,y,x+w,y+h,long_at(a+8));
         if(attr!=4 && attr!=1 && attr!=0)return; /* Replace/normal/reverse only. */
         for(int i=0;i<MAX_SAVES;i++)if(saves[i].address && same_bitmap(&saves[i],buffer)) {
+            if(attr==4 && saves[i].compact)compact_restore=i;
             for(int j=0;j<saves[i].count;j++){Cell c=saves[i].cells[j];c.x+=x;c.y+=y;c.left+=x;c.right+=x;c.top+=y;c.bottom+=y;insert(p,c);}break;
         }
     } else if(pc==scroll || pc==shift) {
         uint32_t r=long_at(a);int x=byte_at(r),y=byte_at(r+1),right=byte_at(r+2),bottom=byte_at(r+3),n=(short)word_at(a+8);
+        begin_clipped_raster(p,x,y,right+1,bottom+1,long_at(a+4));
         /* Signed amount is validated against the final LCD; unsupported clipping
            or OS-specific direction simply leaves those cells to the fallback. */
         for(int i=0;i<p->count;i++)if(inside(p->cells[i],x,y,right-x+1,bottom-y+1)) {
@@ -365,13 +456,13 @@ void hdtext_run_begin(void) { pthread_mutex_lock(&lock);if(hdtext_active)initial
 void hdtext_run_end(void) { pthread_mutex_unlock(&lock); }
 void hdtext_enable(int enabled) {
     pthread_mutex_lock(&lock);
-    if(hdtext_active!=(enabled!=0)){memset(pending_text,0,sizeof(pending_text));pending_text_count=0;memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));editor=0;home_capture=home_complete=home_marker_count=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));}
+    if(hdtext_active!=(enabled!=0)){memset(pending_text,0,sizeof(pending_text));pending_text_count=0;memset(pending_raster,0,sizeof(pending_raster));pending_raster_count=0;memset(ports,0,sizeof(ports));clear_saves();editor=0;home_capture=home_complete=home_marker_count=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));}
     hdtext_active=enabled!=0;pthread_mutex_unlock(&lock);
 }
 void hdtext_reset(void) {
-    pthread_mutex_lock(&lock);memset(pending_text,0,sizeof(pending_text));pending_text_count=0;ready=0;font_slot=port_slot=window_slot=shape_finish=0;memset(shape_sites,0,sizeof(shape_sites));memset(font_offsets,0,sizeof(font_offsets));
+    pthread_mutex_lock(&lock);memset(pending_text,0,sizeof(pending_text));pending_text_count=0;memset(pending_raster,0,sizeof(pending_raster));pending_raster_count=0;ready=0;font_slot=port_slot=window_slot=shape_finish=0;memset(shape_sites,0,sizeof(shape_sites));memset(font_offsets,0,sizeof(font_offsets));
     home_start=home_finish=home_record=0;home_capture=home_complete=home_marker_count=0;editor=heap_slot=0;y_capture=y_complete=y_extra_count=0;expression_active=-1;expression_next=0;memset(expressions,0,sizeof(expressions));
-    memset(hdtext_pages,0,sizeof(hdtext_pages));memset(ports,0,sizeof(ports));memset(saves,0,sizeof(saves));next_save=0;
+    memset(hdtext_pages,0,sizeof(hdtext_pages));memset(ports,0,sizeof(ports));clear_saves();next_save=0;
     pthread_mutex_unlock(&lock);
 }
 static int matches(Cell c,const uint8_t *pixels,int inverse) {
@@ -393,6 +484,14 @@ static int matches(Cell c,const uint8_t *pixels,int inverse) {
             ink++;if(x<left)left=x;if(x>right)right=x;if(y<top)top=y;if(y>bottom)bottom=y;
         }
     }
+    /* AMS A_SHADED rotates each font row into LCD byte coordinates,
+           then alternates 0xA5/0x5A masks. The phase starts at the first
+           clipped row, rather than at the screen's global Y coordinate. */
+    if(c.attr==3)for(int y=0;y<h;y++) {
+            int first=c.top>c.y?c.top-c.y:0;
+            int mask=((y-first)&1)?0x5a:0xa5;
+            for(int x=0;x<w;x++)if(!(mask>>(7-((origin+x)&7))&1))rows[y]&=~(1<<(7-x));
+        }
     int foreground=0,background=0,visible_ink=0;
     for(int y=0;y<h;y++)for(int x=0;x<w;x++) {
         if(!visible(c,origin+x,c.y+y))continue;
@@ -467,20 +566,32 @@ int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
         int32_t v[12]={p->cursor_x,85,4,0,cursor_mask,2,8,2,0,0,160,100};
         memcpy(out,v,sizeof v);count=1;
     }
+    if(hdtext_active && tihw.on_off && p && pending_raster_count)for(int i=0;i<16 && count<capacity;i++) {
+        PendingRaster r=pending_raster[i];if(!r.pc || r.address!=p->address)continue;
+        int l=r.left<0?0:r.left,top=r.top<0?0:r.top,right=r.right>160?160:r.right,bottom=r.bottom>100?100:r.bottom;
+        if(l>=right || top>=bottom)continue;
+        int32_t v[12]={l,top,14,0,0,right-l,bottom-top,-1,l,top,right,bottom};memcpy(out+count++*12,v,sizeof v);
+    }
     if(hdtext_active && tihw.on_off && font_offsets[0] && p)for(int i=0;i<p->count;) {
         Cell c=p->cells[i];int inv=matches(c,pixels,0)?0:matches(c,pixels,1)?1:-1;
         if(inv<0){
             /* A host frame may fall between the ROM's stem and cap calls.
                Keep an unfinished shape until the common layout continuation,
                without exporting any pixels that have not yet validated. */
-            if(c.pending){i++;continue;}
+            if(c.pending || raster_contains(p,c)){
+                /* Do not let host bitmap fallback classify unfinished strokes
+                   as unrelated characters. This reserves the clipped cell but
+                   does not draw, erase, or invent a replacement glyph. */
+                if(count<capacity){int32_t *v=out+count*PACKET_SIZE;v[0]=c.x+(c.font<2);v[1]=c.y;v[2]=14;v[3]=c.code;v[4]=0;v[5]=c.w;v[6]=c.h;v[7]=c.font;v[8]=c.left<0?0:c.left;v[9]=c.top<0?0:c.top;v[10]=c.right>160?160:c.right;v[11]=c.bottom>100?100:c.bottom;count++;}
+                i++;continue;
+            }
             p->cells[i]=p->cells[--p->count];continue;
         }
         i++;
-        if(c.attr==3)continue; /* Shaded glyphs intentionally stay original. */
         if(count<capacity){int32_t *v=out+count*PACKET_SIZE;v[0]=c.x+(c.font<2);v[1]=c.y;v[2]=c.font;v[3]=c.code;v[4]=inv;v[5]=c.w;v[6]=c.h;v[7]=c.attr;v[8]=c.left<0?0:c.left;v[9]=c.top<0?0:c.top;v[10]=c.right>160?160:c.right;v[11]=c.bottom>100?100:c.bottom;count++;}
     }
     int screen=p ? editor_screen(pixels):0;
+    restore_compact(pixels,screen==1);
 
     if(screen) {
         /* Copy the complete editor, not its scrolled display slice. Resolve its

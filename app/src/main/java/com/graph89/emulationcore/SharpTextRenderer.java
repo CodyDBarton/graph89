@@ -133,6 +133,12 @@ final class SharpTextRenderer {
             triangle.lineTo(g.minX, g.maxY + 1); triangle.close();
             outlines.put(g, triangle); return triangle;
         }
+        if(SharpTextRecognizer.sizedSymbol(g.character-0xe100) && g.font>=0 && g.font<3) {
+            String text=String.valueOf((char)(0xe400+g.font*256+g.character-0xe100));
+            Path path=new Path();ink.getTextPath(text,0,1,0,0,path);
+            Matrix matrix=new Matrix();matrix.setScale(1f/200,1f/200);matrix.postTranslate(0,10);path.transform(matrix);
+            outlines.put(g,path);return path;
+        }
         if (g.character == SharpTextRecognizer.specialCharacter(180)) {
             // The ROM's raised -1 is one glyph. Each font size has its own
             // approved composition, already laid out at 200 units per pixel.
@@ -260,7 +266,13 @@ final class SharpTextRenderer {
             background.setColor(cell.inverse ? onColor : offColor);
             canvas.drawRect(left + g.minX * sx, top + g.minY * sy,
                 left + (g.maxX + 1) * sx, top + (g.maxY + 1) * sy, background);
-            ink.setColor(cell.inverse ? offColor : onColor);
+            // Preserve the disabled cue with half-contrast approved outlines.
+            int foreground=cell.inverse ? offColor : onColor;
+            int base=cell.inverse ? onColor : offColor;
+            ink.setColor(cell.shaded ? android.graphics.Color.rgb(
+                (android.graphics.Color.red(foreground)+android.graphics.Color.red(base))/2,
+                (android.graphics.Color.green(foreground)+android.graphics.Color.green(base))/2,
+                (android.graphics.Color.blue(foreground)+android.graphics.Color.blue(base))/2) : foreground);
             int saved = canvas.save();
             canvas.translate(left, top); canvas.scale(sx, sy);
             canvas.clipRect(0, 0, g.width, g.height);

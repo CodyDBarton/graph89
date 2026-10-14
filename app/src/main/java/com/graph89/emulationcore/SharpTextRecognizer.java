@@ -42,13 +42,16 @@ public final class SharpTextRecognizer {
     }
     public static final class Cell {
         public final int x, y, clipLeft, clipTop, clipRight, clipBottom;
-        public final boolean inverse;
+        public final boolean inverse, shaded;
         public final Glyph glyph;
         Cell(int x, int y, boolean inverse, Glyph glyph) {
             this(x,y,inverse,glyph,0,0,160,100);
         }
         Cell(int x,int y,boolean inverse,Glyph glyph,int left,int top,int right,int bottom) {
-            this.x=x;this.y=y;this.inverse=inverse;this.glyph=glyph;
+            this(x,y,inverse,glyph,left,top,right,bottom,false);
+        }
+        Cell(int x,int y,boolean inverse,Glyph glyph,int left,int top,int right,int bottom,boolean shaded) {
+            this.x=x;this.y=y;this.inverse=inverse;this.shaded=shaded;this.glyph=glyph;
             clipLeft=left;clipTop=top;clipRight=right;clipBottom=bottom;
         }
     }
@@ -75,6 +78,23 @@ public final class SharpTextRecognizer {
      * font's Windows encoding cannot confuse calculator symbol identities. */
     public static char specialCharacter(int romCode) {
         switch (romCode) {
+            case 11:
+            case 14:
+            case 15:
+            case 16:
+            case 17:
+            case 19:
+            case 20:
+            case 21:
+            case 23:
+            case 24:
+            case 25:
+            case 26:
+            case 27:
+            case 127:
+            case 173:
+            case 181:
+
             case 18:
             case 22:
             case 28:
@@ -126,6 +146,28 @@ public final class SharpTextRecognizer {
             default: return 0;
         }
     }
+    public static boolean sizedSymbol(int code) {
+        switch(code) {
+            case 11:
+            case 14:
+            case 15:
+            case 16:
+            case 17:
+            case 19:
+            case 20:
+            case 21:
+            case 23:
+            case 24:
+            case 25:
+            case 26:
+            case 27:
+            case 127:
+            case 173:
+            case 181:
+                return true;
+            default:return false;
+        }
+    }
     private static boolean textAnchor(char c) {
         if (Character.isLetterOrDigit(c)) return true;
         int code = c - 0xe100;
@@ -155,6 +197,9 @@ public final class SharpTextRecognizer {
                 if (glyph.ink == 0) continue;
                 capturedGlyphs[f][c] = character == approved ? glyph : new Glyph(f,w,h,approved,rows);
                 if (f == 0 && (c == 'F' || (c >= '1' && c <= '8'))) toolbarLabels.put((char)c, glyph);
+                // These UI symbols require a native drawing identity. Do not
+                // classify arbitrary graphics as squares/arrows/check marks.
+                if(sizedSymbol(c))continue;
                 long key = key(w, rows);
                 List<Glyph> bucket = table.get(key);
                 if (bucket == null) { bucket = new ArrayList<Glyph>(); table.put(key, bucket); }
@@ -444,7 +489,7 @@ public final class SharpTextRecognizer {
         List<Cell> direct = new ArrayList<Cell>();
         if (packets != null) for(int i=0;i+11<packets.length;i+=12) {
             int x=packets[i],y=packets[i+1],f=packets[i+2],c=packets[i+3];
-            if(f<0 || f>3 || c<0 || c>=256 || packets[i+7]==3)continue;
+            if(f<0 || f>3 || c<0 || c>=256)continue;
             Glyph g=null;
             if(f<3)g=capturedGlyphs[f][c];
             else {
@@ -460,17 +505,27 @@ public final class SharpTextRecognizer {
             if(g==null || g.width!=packets[i+5] || g.height!=packets[i+6]
                 || l<0 || t<0 || r>160 || b>100 || l>=r || t>=b
                 || x+g.width<=l || x>=r || y+g.height<=t || y>=b)continue;
-            direct.add(new Cell(x,y,packets[i+4]!=0,g,l,t,r,b));
+            direct.add(new Cell(x,y,packets[i+4]!=0,g,l,t,r,b,packets[i+7]==3));
+        }
+        // Native cells are authoritative even if their glyph is unsupported or
+        // still being rasterized. Reservations never erase or replace native ink.
+        List<int[]> regions=new ArrayList<int[]>();
+        if(packets!=null)for(int i=0;i+11<packets.length;i+=12) {
+            int f=packets[i+2];if((f<0 || f>3) && f!=14)continue;
+            int l=Math.max(0,Math.max(packets[i],packets[i+8])),top=Math.max(0,Math.max(packets[i+1],packets[i+9]));
+            int right=Math.min(160,Math.min(packets[i]+packets[i+5],packets[i+10])),bottom=Math.min(100,Math.min(packets[i+1]+packets[i+6],packets[i+11]));
+            if(l<right && top<bottom)regions.add(new int[]{l,top,right,bottom});
         }
         List<Cell> result=new ArrayList<Cell>(direct);
         for(Cell c:fallback) {
             boolean covered=false;
-            for(Cell d:direct) if(c.x<Math.min(d.clipRight,d.x+d.glyph.width) && Math.max(d.clipLeft,d.x)<c.x+c.glyph.width
-                && c.y<Math.min(d.clipBottom,d.y+d.glyph.height) && Math.max(d.clipTop,d.y)<c.y+c.glyph.height){covered=true;break;}
+            for(int[] d:regions)if(Math.max(c.x,c.clipLeft)<d[2] && d[0]<Math.min(c.x+c.glyph.width,c.clipRight)
+                && Math.max(c.y,c.clipTop)<d[3] && d[1]<Math.min(c.y+c.glyph.height,c.clipBottom)){covered=true;break;}
             if(!covered)result.add(c);
         }
         if (framePixels != null && homeFrame && !graphFrame) {
             boolean[] occupied=disabledToolbar.clone();
+            for(int[] d:regions)for(int y=d[1];y<d[3];y++)for(int x=d[0];x<d[2];x++)occupied[y*160+x]=true;
             if(inputBaseline>=0)for(int y=inputBaseline;y<inputBaseline+8;y++)
                 for(int x=0;x<160;x++)occupied[y*160+x]=true;
             for(Cell c:direct)occupy(c,occupied,160);

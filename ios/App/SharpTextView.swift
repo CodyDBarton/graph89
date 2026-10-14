@@ -173,6 +173,11 @@ final class SharpTextView: UIView {
         if ProcessInfo.processInfo.arguments.contains("--ui-test") {
             accessibilityIdentifier="retained:\(recognizer.retainedCount(retained))"
             accessibilityValue = "on:\(cells.count)"
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-disabled") {
+                let disabled=cells.filter { $0.shaded }.sorted { $0.y==$1.y ? $0.x<$1.x:$0.y<$1.y }
+                let text=String(disabled.compactMap { UnicodeScalar($0.glyph.character).map(Character.init) })
+                accessibilityValue="on:\(cells.count);shaded:\(disabled.count);disabled:\(text)"
+            }
             if ProcessInfo.processInfo.arguments.contains("--ui-test-inverse-trig") {
                 let raised=cells.filter { $0.glyph.character==SharpTextRecognizer.special(180) }
                 accessibilityValue="on:\(cells.count);raised:\(raised.count),inverse:\(raised.filter { $0.inverse }.count)"
@@ -196,6 +201,21 @@ final class SharpTextView: UIView {
                 } else { accessibilityValue="on:\(cells.count);clipped:\(clipped.count),math:\(clipped.filter { $0.glyph.dynamic }.count),inverse:\(clipped.filter { $0.glyph.dynamic && $0.inverse }.count)" }
             }
         }
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-lcm-error") {
+                let letters=cells.filter { $0.glyph.font<=1 && $0.y>=20 && $0.y<70 }.sorted {$0.y==$1.y ? $0.x<$1.x:$0.y<$1.y}
+                let text=String(letters.compactMap {UnicodeScalar($0.glyph.character).map(Character.init)})
+                var home=Set<Int32>()
+                for i in stride(from:0,to:retained.count,by:12) where retained[i+2]==5 {
+                    if retained[i+7]==1 || retained[i+7]==2 {home.insert(retained[i+3])}
+                }
+                var foreign=0
+                for i in stride(from:0,to:retained.count,by:12) {
+                    guard home.contains(retained[i+8]) else {continue}
+                    let kind=retained[i+2],y=retained[i+1]
+                    if (kind==6 && y>=83) || (kind==7 && min(y,retained[i+4])>=83) {foreign+=1}
+                }
+                accessibilityValue=(accessibilityValue ?? "")+";lcmError:\(text.contains("Toomanyarguments") ? 1:0);foreignChildren:\(foreign)"
+            }
         // Text recognition runs after updatePlot and may refresh these values.
         // Keep the graph test's snapshot count authoritative when both layers
         // are enabled, instead of briefly replacing it with the text counter.
@@ -220,6 +240,11 @@ final class SharpTextView: UIView {
             path.addLine(to:CGPoint(x:CGFloat(g.maxX+1),y:CGFloat(g.minY+g.maxY+1)/2))
             path.addLine(to:CGPoint(x:CGFloat(g.minX),y:CGFloat(g.maxY+1)))
             path.closeSubpath();paths[id]=path;return path
+        }
+        if SharpTextRecognizer.sizedSymbol(g.character-0xe100),(0...2).contains(g.font) {
+            guard let font,let path=glyphPath(0xe400+g.font*256+g.character-0xe100,font) else {return nil}
+            var matrix=CGAffineTransform(a:1.0/200,b:0,c:0,d:-1.0/200,tx:0,ty:10)
+            let transformed=path.copy(using:&matrix);paths[id]=transformed;return transformed
         }
         if g.character==SharpTextRecognizer.special(180) {
             // Match the approved size-specific composition at 200 units/pixel.
@@ -368,7 +393,7 @@ final class SharpTextView: UIView {
                 if pixels[(cell.y+y)*160+cell.x+x] != cell.inverse { clip.addRect(CGRect(x:x,y:y,width:1,height:1)) }
             } }
             context.addPath(clip);context.clip(using:.evenOdd)
-            context.setFillColor(UIColor(white:(cell.inverse ? 210:30)/255.0,alpha:1).cgColor)
+            context.setFillColor(UIColor(white:(cell.shaded ? 120:(cell.inverse ? 210:30))/255.0,alpha:1).cgColor)
             context.addPath(path);context.fillPath();context.restoreGState()
         }
         if let scene { drawCompact(scene,context) }

@@ -5,9 +5,10 @@ import Foundation
 final class SharpTextRecognizer {
     static let dropdown = 0xe200
     static func special(_ code: Int) -> Int {
-        let approved = [18,22,28,29,30,31,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,168,176,177,180,183,188,189,190]
+        let approved = [11,14,15,16,17,19,20,21,23,24,25,26,27,127,173,181,18,22,28,29,30,31,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,168,176,177,180,183,188,189,190]
         return approved.contains(code) ? 0xe100 + code : 0
     }
+    static func sizedSymbol(_ code:Int)->Bool { [11,14,15,16,17,19,20,21,23,24,25,26,27,127,173,181].contains(code) }
     final class Glyph {
         let font: Int, width: Int, height: Int, character: Int, rows: [Int], dynamic: Bool
         let ink: Int, minX: Int, maxX: Int, minY: Int, maxY: Int
@@ -22,7 +23,7 @@ final class SharpTextRecognizer {
     }
     struct Cell {
         let x:Int,y:Int,inverse:Bool,glyph:Glyph
-        var clipLeft=0,clipTop=0,clipRight=160,clipBottom=100
+        var clipLeft=0,clipTop=0,clipRight=160,clipBottom=100,shaded=false
     }
     struct Run {
         var cells: [Cell]=[]; var letters=0, ink=0, font=0
@@ -48,6 +49,7 @@ final class SharpTextRecognizer {
             let g=Glyph(f,w,h,ch,rows); if g.ink==0 { continue }
             capturedGlyphs[f][c] = ch == approved ? g : Glyph(f,w,h,approved,rows)
             if f==0 && (c==70 || (49...56).contains(c)) { labels[c]=g }
+            if Self.sizedSymbol(c) {continue} // Native identity only; never guess these UI markers from graphics.
             tables[f][key(w,rows),default:[]].append(g)
             if !widths[f].contains(w) { widths[f].append(w) }
         } }
@@ -415,7 +417,7 @@ final class SharpTextRecognizer {
         var direct: [Cell] = []
         for i in stride(from:0,to:packets.count-packets.count%12,by:12) {
             let x=Int(packets[i]),y=Int(packets[i+1]),f=Int(packets[i+2]),c=Int(packets[i+3])
-            guard (0...3).contains(f),(0..<256).contains(c),packets[i+7] != 3 else { continue }
+            guard (0...3).contains(f),(0..<256).contains(c) else { continue }
             var glyph:Glyph?
             if f<3 { glyph=capturedGlyphs[f][c] }
             else {
@@ -429,18 +431,30 @@ final class SharpTextRecognizer {
             let l=Int(packets[i+8]),t=Int(packets[i+9]),r=Int(packets[i+10]),b=Int(packets[i+11])
             guard let g=glyph,g.width==Int(packets[i+5]),g.height==Int(packets[i+6]),
                   l>=0,t>=0,r<=160,b<=100,l<r,t<b,x+g.width>l,x<r,y+g.height>t,y<b else { continue }
-            direct.append(Cell(x:x,y:y,inverse:packets[i+4] != 0,glyph:g,clipLeft:l,clipTop:t,clipRight:r,clipBottom:b))
+            direct.append(Cell(x:x,y:y,inverse:packets[i+4] != 0,glyph:g,clipLeft:l,clipTop:t,clipRight:r,clipBottom:b,shaded:packets[i+7]==3))
         }
         return direct
     }
     func retainedCount(_ packets: [Int32]) -> Int { captured(packets).count }
+    private func nativeRegions(_ packets: [Int32]) -> [[Int]] {
+        var regions:[[Int]]=[]
+        for i in stride(from:0,to:packets.count-packets.count%12,by:12) where (0...3).contains(packets[i+2]) || packets[i+2]==14 {
+            let left=max(0,Int(packets[i]),Int(packets[i+8])),top=max(0,Int(packets[i+1]),Int(packets[i+9]))
+            let right=min(160,Int(packets[i]+packets[i+5]),Int(packets[i+10])),bottom=min(100,Int(packets[i+1]+packets[i+6]),Int(packets[i+11]))
+            if left<right && top<bottom {regions.append([left,top,right,bottom])}
+        }
+        return regions
+    }
     func retained(_ packets: [Int32], fallback: [Cell]) -> [Cell] {
-        let direct=captured(packets)
-        let result = direct + fallback.filter { c in !direct.contains { d in
-            c.x < min(d.clipRight,d.x+d.glyph.width) && max(d.clipLeft,d.x) < c.x+c.glyph.width && c.y < min(d.clipBottom,d.y+d.glyph.height) && max(d.clipTop,d.y) < c.y+c.glyph.height
+        let direct=captured(packets),regions=nativeRegions(packets)
+        // Native identities, including unsupported symbols and unfinished calls,
+        // own their cells. Keep their original pixels if no approved outline exists.
+        let result = direct + fallback.filter { c in !regions.contains { d in
+            max(c.x,c.clipLeft)<d[2] && d[0]<min(c.x+c.glyph.width,c.clipRight) && max(c.y,c.clipTop)<d[3] && d[1]<min(c.y+c.glyph.height,c.clipBottom)
         } }
         guard framePixels.count==16000,homeFrame,!graph else { return result }
         var occupied=blocked
+        for d in regions { for y in d[1]..<d[3] { for x in d[0]..<d[2] {occupied[y*160+x]=true} } }
         if input>=0 { for y in input..<input+8 { for x in 0..<160 { occupied[y*160+x]=true } } }
         for c in direct { occupy(c,&occupied,160) }
         var shaped=result
