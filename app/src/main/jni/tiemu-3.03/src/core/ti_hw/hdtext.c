@@ -13,7 +13,7 @@
 #define LCD_PORT 0x4c00
 #define PACKET_SIZE 12
 
-typedef struct { int x,y,font,code,attr,left,top,right,bottom,w,h,pending; } Cell;
+typedef struct { int x,y,font,code,attr,left,top,right,bottom,w,h,pending,restore_left,restore_top,restore_right,restore_bottom,shade_top; } Cell;
 typedef struct { uint32_t address; int count,cursor_x,cursor_valid; Cell cells[MAX_CELLS]; } Port;
 typedef struct { uint32_t address; int w,h,count; uint8_t bitmap[3840]; Cell cells[MAX_CELLS]; struct CompactSnapshot *compact; } Saved;
 int hdtext_active;
@@ -218,6 +218,31 @@ static void insert(Port *p,Cell c) {
     }
     if(c.code!=32 && p->count<MAX_CELLS)p->cells[p->count++]=c;
 }
+/* Opaque fills can cover only part of a glyph. Preserve the untouched
+   rectangles with their native identity instead of discarding the whole cell. */
+static void cover_cells(Port *p,int left,int top,int right,int bottom,uint32_t clip) {
+    if(clip) {
+        int l=byte_at(clip),t=byte_at(clip+1),r=byte_at(clip+2),b=byte_at(clip+3);
+        if(l>=0 && t>=0 && r>=l && b>=t && r<240 && b<128) {
+            if(left<l)left=l;if(top<t)top=t;if(right>r+1)right=r+1;if(bottom>b+1)bottom=b+1;
+        }
+    }
+    if(left>=right || top>=bottom)return;
+    for(int i=p->count-1;i>=0;i--) {
+        Cell c=p->cells[i];int origin=c.x+(c.font<2);
+        int l=origin>c.left?origin:c.left,t=c.y>c.top?c.y:c.top;
+        int r=origin+c.w<c.right?origin+c.w:c.right,b=c.y+c.h<c.bottom?c.y+c.h:c.bottom;
+        int il=l>left?l:left,it=t>top?t:top,ir=r<right?r:right,ib=b<bottom?b:bottom;
+        if(il>=ir || it>=ib)continue;
+        p->cells[i]=p->cells[--p->count];
+        int rectangles[4][4]={{l,t,r,it},{l,ib,r,b},{l,it,il,ib},{ir,it,r,ib}};
+        for(int k=0;k<4 && p->count<MAX_CELLS;k++) {
+            int *q=rectangles[k];if(q[0]>=q[2] || q[1]>=q[3])continue;
+            Cell part=c;part.left=q[0];part.top=q[1];part.right=q[2];part.bottom=q[3];
+            p->cells[p->count++]=part;
+        }
+    }
+}
 static int inside(Cell c,int x,int y,int w,int h) {
     return c.x>=x && c.y>=y && c.x+c.w<=x+w && c.y+c.h<=y+h;
 }
@@ -359,8 +384,17 @@ void hdtext_observe(uint32_t pc) {
             }
         }
     }
-    if(pc==clip_line && expression_active>=0) {
-        uint32_t r=long_at(a);remember_primitive((Primitive){.kind=1,.x=(short)word_at(r),.y=(short)word_at(r+2),.x1=(short)word_at(r+4),.y1=(short)word_at(r+6),.attr=(short)word_at(a+8)});
+    if(pc==clip_line) {
+        uint32_t r=long_at(a);int x=(short)word_at(r),y=(short)word_at(r+2);
+        int x1=(short)word_at(r+4),y1=(short)word_at(r+6),attr=(short)word_at(a+8);
+        if(expression_active>=0)remember_primitive((Primitive){.kind=1,.x=x,.y=y,.x1=x1,.y1=y1,.attr=attr});
+        /* Dialog borders overwrite one more row than their interior fill.
+           Preserve the rest of any glyph crossed by an opaque straight edge. */
+        if((attr==0 || attr==1) && (x==x1 || y==y1)) {
+            int left=x<x1?x:x1,right=x>x1?x:x1,top=y<y1?y:y1,bottom=y>y1?y:y1;
+            cover_cells(p,left,top,right+1,bottom+1,long_at(a+4));
+            begin_clipped_raster(p,left,top,right+1,bottom+1,long_at(a+4));
+        }
     }
     if(pc==draw_pix && expression_active>=0)remember_primitive((Primitive){.kind=1,.x=(short)word_at(a),.y=(short)word_at(a+2),.x1=(short)word_at(a),.y1=(short)word_at(a+2),.attr=(short)word_at(a+4)});
     if(shape_finish && pc==shape_finish) {
@@ -388,7 +422,10 @@ void hdtext_observe(uint32_t pc) {
         }
         /* Cursor XOR is already normalized row by row below. Reserving its
            padding would downgrade adjacent fallback text during every blink. */
-        if(!cursor)begin_clipped_raster(p,x,y,right+1,bottom+1,long_at(a+4));
+        if(!cursor) {
+            if(attr==0 || attr==1)cover_cells(p,x,y,right+1,bottom+1,long_at(a+4));
+            begin_clipped_raster(p,x,y,right+1,bottom+1,long_at(a+4));
+        }
         return;
     }
     if(pc==draw_char || pc==draw_clip) {
@@ -398,6 +435,7 @@ void hdtext_observe(uint32_t pc) {
             if(x<0 || y<0 || right<x || bottom<y)return;
             c.left=x;c.top=y;c.right=right+1;c.bottom=bottom+1;
         }
+        c.shade_top=c.top;
         remember_primitive((Primitive){.x=c.x+(c.font<2),.y=c.y,.font=c.font,.code=c.code,.w=c.w,.h=c.h,.attr=c.attr});
         if(y_capture && expression_active<0 && address==tihw.lcd_adr && c.y+c.h>83 && y_extra_count<128)y_extra[y_extra_count++]=c;
         if(home_capture && expression_active<0 && address==tihw.lcd_adr && c.x<6 && c.code==16 && home_marker_count<32) {
@@ -429,9 +467,12 @@ void hdtext_observe(uint32_t pc) {
             if(b>=0 && (b&(0x80>>((x+column)&7))))s->bitmap[row*stride+column/8]|=0x80>>(column&7);
         }
         for(int i=0;i<p->count;i++)if(overlaps(p->cells[i],(Cell){.x=x,.y=y,.w=s->w,.h=s->h,.left=x,.top=y,.right=right+1,.bottom=bottom+1})) {
-            Cell c=p->cells[i];c.left=c.left>x?c.left:x;c.top=c.top>y?c.top:y;
+            Cell c=p->cells[i];
+            c.restore_left=c.left-x;c.restore_top=c.top-y;
+            c.restore_right=c.right-x;c.restore_bottom=c.bottom-y;
+            c.left=c.left>x?c.left:x;c.top=c.top>y?c.top:y;
             c.right=c.right<right+1?c.right:right+1;c.bottom=c.bottom<bottom+1?c.bottom:bottom+1;
-            c.x-=x;c.y-=y;c.left-=x;c.right-=x;c.top-=y;c.bottom-=y;s->cells[s->count++]=c;
+            c.x-=x;c.y-=y;c.left-=x;c.right-=x;c.top-=y;c.bottom-=y;c.shade_top-=y;s->cells[s->count++]=c;
         }
     } else if(pc==bitmap_put) {
         int x=(short)word_at(a),y=(short)word_at(a+2),attr=(short)word_at(a+12);uint32_t buffer=long_at(a+4);
@@ -440,7 +481,7 @@ void hdtext_observe(uint32_t pc) {
         if(attr!=4 && attr!=1 && attr!=0)return; /* Replace/normal/reverse only. */
         for(int i=0;i<MAX_SAVES;i++)if(saves[i].address && same_bitmap(&saves[i],buffer)) {
             if(attr==4 && saves[i].compact)compact_restore=i;
-            for(int j=0;j<saves[i].count;j++){Cell c=saves[i].cells[j];c.x+=x;c.y+=y;c.left+=x;c.right+=x;c.top+=y;c.bottom+=y;insert(p,c);}break;
+            for(int j=0;j<saves[i].count;j++){Cell c=saves[i].cells[j];c.x+=x;c.y+=y;c.left+=x;c.right+=x;c.top+=y;c.bottom+=y;c.restore_left+=x;c.restore_right+=x;c.restore_top+=y;c.restore_bottom+=y;c.shade_top+=y;insert(p,c);}break;
         }
     } else if(pc==scroll || pc==shift) {
         uint32_t r=long_at(a);int x=byte_at(r),y=byte_at(r+1),right=byte_at(r+2),bottom=byte_at(r+3),n=(short)word_at(a+8);
@@ -488,7 +529,7 @@ static int matches(Cell c,const uint8_t *pixels,int inverse) {
            then alternates 0xA5/0x5A masks. The phase starts at the first
            clipped row, rather than at the screen's global Y coordinate. */
     if(c.attr==3)for(int y=0;y<h;y++) {
-            int first=c.top>c.y?c.top-c.y:0;
+            int first=c.shade_top>c.y?c.shade_top-c.y:0;
             int mask=((y-first)&1)?0x5a:0xa5;
             for(int x=0;x<w;x++)if(!(mask>>(7-((origin+x)&7))&1))rows[y]&=~(1<<(7-x));
         }
@@ -521,6 +562,30 @@ static int matches(Cell c,const uint8_t *pixels,int inverse) {
         if(!cursor)return 0;
     }
     return ink>0;
+}
+/* Complete and deduplicate restored identities before exporting any packet;
+   otherwise an earlier fragment could already have been emitted in this frame. */
+static void restore_cells(Port *p,const uint8_t *pixels) {
+    for(int i=0;i<p->count;i++) {
+        Cell c=p->cells[i];
+        if(c.restore_right>c.restore_left && !c.pending && !raster_contains(p,c)) {
+            Cell full=c;full.left=c.restore_left;full.top=c.restore_top;
+            full.right=c.restore_right;full.bottom=c.restore_bottom;
+            if(matches(full,pixels,0) || matches(full,pixels,1)) {
+                full.restore_left=full.restore_top=full.restore_right=full.restore_bottom=0;
+                p->cells[i]=c=full;
+                /* The restored part and surviving part now form one glyph. */
+                for(int j=p->count-1;j>=0;j--)if(j!=i) {
+                    Cell other=p->cells[j];
+                    if(other.x==c.x && other.y==c.y && other.font==c.font && other.code==c.code
+                        && other.attr==c.attr && overlaps(other,c)) {
+                        p->cells[j]=p->cells[--p->count];
+                        if(i==p->count)i=j;
+                    }
+                }
+            }
+        }
+    }
 }
 /* Home and Y= share bottom borders and TEXT_EDIT geometry. Identify the
    visible toolbar before exporting either layout; cached pointers alone cannot
@@ -572,8 +637,10 @@ int hdtext_copy_locked(const uint8_t *pixels,int32_t *out,int capacity) {
         if(l>=right || top>=bottom)continue;
         int32_t v[12]={l,top,14,0,0,right-l,bottom-top,-1,l,top,right,bottom};memcpy(out+count++*12,v,sizeof v);
     }
+    if(hdtext_active && tihw.on_off && font_offsets[0] && p)restore_cells(p,pixels);
     if(hdtext_active && tihw.on_off && font_offsets[0] && p)for(int i=0;i<p->count;) {
-        Cell c=p->cells[i];int inv=matches(c,pixels,0)?0:matches(c,pixels,1)?1:-1;
+        Cell c=p->cells[i];
+        int inv=matches(c,pixels,0)?0:matches(c,pixels,1)?1:-1;
         if(inv<0){
             /* A host frame may fall between the ROM's stem and cap calls.
                Keep an unfinished shape until the common layout continuation,

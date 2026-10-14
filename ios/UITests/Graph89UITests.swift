@@ -592,6 +592,34 @@ final class Graph89UITests: XCTestCase {
         let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD inverse trig inverted";selected.lifetime = .keepAlways;add(selected)
     }
 
+    func testCatalogHelpPreservesClippedRow() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-catalog-help"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:15))
+        for key in ["HOME","CLEAR","CATALOG"] { tap(app,key) }
+        let overlay=app.otherElements["Sharp text rendering"]
+        func waitFor(_ value: String) {
+            expectation(for: NSPredicate { _,_ in (overlay.value as? String ?? "").contains(value) }, evaluatedWith: overlay)
+            waitForExpectations(timeout: 10)
+        }
+        waitFor("catalogFull:4")
+        let before=pixels(app)
+        tap(app,"F2")
+        waitFor("catalogFull:4")
+        if let before, let after=pixels(app) {
+            XCTAssertEqual(Array(before[26*160..<94*160]),Array(after[26*160..<94*160]),"F2 stays in the already selected Built-in list")
+        } else { XCTFail("Missing Catalog LCD pixels") }
+        for _ in 0..<3 {
+            tap(app,"F1")
+            waitFor("catalogBottom:4")
+            let help=XCTAttachment(screenshot:app.screenshot());help.name="Sharp clipped Catalog row under Help";help.lifetime = .keepAlways;add(help)
+            tap(app,"ESC")
+            waitFor("catalogFull:4")
+        }
+        let restored=XCTAttachment(screenshot:app.screenshot());restored.name="Complete sharp Catalog row restored";restored.lifetime = .keepAlways;add(restored)
+    }
+
     func testSharpCatalogTriangle() {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text"]

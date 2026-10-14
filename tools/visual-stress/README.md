@@ -25,3 +25,9 @@ Sharp disabled text validation: `python3 tools/visual-stress/check-disabled.py C
 Missing-symbol proposals can be regenerated with the bundled Pillow runtime using `android/sharp-text/preview-remaining-symbols.py LOCAL_FONTS_BIN`. This writes comparison sheets only into ignored build output; it does not edit font assets, recognizer mappings, or production artwork. New designs require the user's approval before integration.
 
 For exact LCM-error recovery, run `run.py ROM --scenario errors --output OUTPUT`, then `check-lcm-recovery.py OUTPUT --original ORIGINAL_OUTPUT`. Use `--native-original` for the reference run with retained hooks disabled. The checker verifies five real error dialogs, no compact rendering over a dialog, unchanged completed expression primitives after ten dismiss/clear operations, and identical native Home pixels throughout. The host viewer's `--compact` option draws the production compact renderer for visual inspection.
+
+Catalog help regression: run `run.py ROM --scenario catalog-help --output OUTPUT`.
+Use a pre-fix capture as `check-catalog-help.py OUTPUT --original BEFORE`; it checks
+ten dismissals restore all complete Catalog glyphs and every LCD frame is unchanged.
+Help dialog fills and straight borders retain uncovered glyph fragments; bitmap
+restoration expands saved identities only after the complete original glyph validates.

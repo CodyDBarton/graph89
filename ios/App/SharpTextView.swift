@@ -182,6 +182,10 @@ final class SharpTextView: UIView {
                 let raised=cells.filter { $0.glyph.character==SharpTextRecognizer.special(180) }
                 accessibilityValue="on:\(cells.count);raised:\(raised.count),inverse:\(raised.filter { $0.inverse }.count)"
             }
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-catalog-help") {
+                let row=cells.filter { $0.y==60 && $0.glyph.font==1 && (17...35).contains($0.x) }
+                accessibilityValue="catalogFull:\(row.filter { $0.clipTop<=60 && $0.clipBottom>=68 }.count);catalogBottom:\(row.filter { $0.clipTop==64 && $0.clipBottom==68 }.count)"
+            }
             if ProcessInfo.processInfo.arguments.contains("--ui-test-cursor") {
                 accessibilityValue="on:\(cells.count);entry:\(cells.filter { $0.y==85 && $0.glyph.font==1 }.count);cursor:\(SharpTextRecognizer.cursor(retained)?.mask ?? 0)"
             }

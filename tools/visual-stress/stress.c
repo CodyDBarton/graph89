@@ -67,6 +67,22 @@ int main(int argc,char **argv){
   tap("queued-lcm-dismiss",TIKEY_ESCAPE);tap("queued-lcm-clear",TIKEY_CLEAR);tap("queued-lcm-select",TIKEY_UP);
   fclose(sequence);graph89_instruction_trace=0;printf("%u actions; %u intermediate/settled frames\n",action,serial);graph89_stop();return 0;
  }
+ if(argc>3 && !strcmp(argv[3],"catalog-help")) {
+  tap("catalog-open",TIKEY_CATALOG);
+  tap("catalog-built-in",TIKEY_F2);
+  for(int i=0;i<10;i++) {
+   tap("catalog-help-open",TIKEY_F1);
+   begin("catalog-help-idle");fprintf(sequence," wait\n");run(4000000);capture(1);
+   tap("catalog-help-close",TIKEY_ESCAPE);
+   tap("catalog-next",TIKEY_DOWN);
+  }
+  tap("catalog-e",TIKEY_DIVIDE);
+  tap("catalog-help-e",TIKEY_F1);tap("catalog-help-e-close",TIKEY_ESCAPE);
+  tap("catalog-p",TIKEY_MINUS);
+  tap("catalog-help-p",TIKEY_F1);tap("catalog-help-p-close",TIKEY_ESCAPE);
+  tap("catalog-close",TIKEY_ESCAPE);
+  fclose(sequence);graph89_instruction_trace=0;printf("%u actions; %u intermediate/settled frames\n",action,serial);graph89_stop();return 0;
+ }
  const char *math[]={"1/sin(x^2)","sqrt(1/(1+x^2))","(x^2+1)/(x^3-1)","sin(x)^(-1)+cos(x)^(-1)","sum(k^2,k,1,8)","[[1,2][3,4]]","{1,2,3,4}"};
  for(int i=0;i<7;i++){tap("clear-input",TIKEY_CLEAR);type("math-input",math[i]);tap("math-evaluate",TIKEY_ENTER1);tap("history-up",TIKEY_UP);tap("history-up",TIKEY_UP);tap("history-down",TIKEY_DOWN);tap("history-exit",TIKEY_ESCAPE);}
  if(argc>3 && !strcmp(argv[3],"errors")) {
