@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        HC0000000000000000000001 /* Host3DCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = HC0000000000000000000002; };
+ SM0000000000000000000001 = {isa = PBXBuildFile; fileRef = SM0000000000000000000002; };
         KI0000000000000000000001 = {isa = PBXBuildFile; fileRef = KI0000000000000000000002; };
 		00000000000000000000000A /* App/Graph89App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000001 /* App/Graph89App.swift */; };
 		00000000000000000000000C /* ../TI89Titanium_OS.89u in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000003 /* ../TI89Titanium_OS.89u */; };
@@ -32,6 +34,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+        HC0000000000000000000002 /* Host3DCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Host3DCamera.swift; sourceTree = "<group>"; };
+ SM0000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Smooth3DView.swift; sourceTree = "<group>"; };
         KI0000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/CalculatorKeyInput.swift; sourceTree = "<group>"; };
 		000000000000000000000001 /* App/Graph89App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Graph89App.swift; sourceTree = "<group>"; };
 		000000000000000000000002 /* App/Graph89-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "App/Graph89-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -73,7 +77,9 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000001 /* App/Graph89App.swift */,
-                KI0000000000000000000002,
+                HC0000000000000000000002,
+                SM0000000000000000000002,
+ KI0000000000000000000002,
 				AC0000000000000000000002 /* Assets.xcassets */,
                 HD0000000000000000000004, HD0000000000000000000005, HD0000000000000000000006,
 				000000000000000000000002 /* App/Graph89-Bridging-Header.h */,
@@ -200,7 +206,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				00000000000000000000000A /* App/Graph89App.swift in Sources */,
-                KI0000000000000000000001,
+                HC0000000000000000000001,
+                SM0000000000000000000001,
+ KI0000000000000000000001,
                 HD0000000000000000000001, HD0000000000000000000002,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

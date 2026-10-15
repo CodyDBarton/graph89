@@ -225,7 +225,7 @@ public class EmulatorScreen
                 // Extra HD samples can advance without changing native raster
                 // pixels. Poll every frame while BUSY, including its final frame;
                 // a completed unchanged screen needs no continuous redraw.
-                changed=CRC!=newCRC || cntr%40==0 || (hd && (flags[1]!=0 || isBusy || hdPlot==null));
+                changed=CRC!=newCRC || cntr%40==0 || (hd && (flags[1]!=0 || isBusy || hdPlot==null || hdPlot.isSmoothRotating()));
                 if(changed) {
                     EmulatorActivity.nativeGetEmulatedScreen(spareData);
                     if(hd && flags[0]==0) {
@@ -314,6 +314,15 @@ public class EmulatorScreen
 		}
 	}
 
+    int hdFrameInterval(float refreshRate) {
+        synchronized(ScreenChangeLock) {
+            if(hdPlot!=null && hdPlot.isSmoothRotating()) {
+                float hz=refreshRate;
+                return Math.max(1,Math.round(1000f/Math.max(60f,hz)));
+            }
+        }
+        return 16;
+    }
     boolean useHDPlot(){
         if(EmulatorActivity.ActiveInstance==null)return false;
         CalculatorConfiguration c=EmulatorActivity.ActiveInstance.Configuration;

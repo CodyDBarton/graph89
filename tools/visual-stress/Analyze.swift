@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
   let font=CTFontCreateWithFontDescriptor(descriptors[0],2048,nil)
   func glyphPath(_ c:Int)->CGPath?{var ch=UniChar(c),g:CGGlyph=0;guard CTFontGetGlyphsForCharacters(font,&ch,&g,1),g != 0 else{return nil};return CTFontCreatePathForGlyph(font,g,nil)}
   var family=CGRect.null;for c in 33..<127{if let p=glyphPath(c){family=family.union(p.boundingBoxOfPath)}}
+  let plotGlyphs=(0..<128).map {SharpTextRecognizer.Glyph(1,6,8,$0,Array(repeating:0,count:8))}
   var paths:[ObjectIdentifier:CGPath]=[:]
   func outline(_ g:SharpTextRecognizer.Glyph)->CGPath? {
    let id=ObjectIdentifier(g);if let p=paths[id]{return p}
@@ -105,8 +106,8 @@ import UniformTypeIdentifiers
                 context.setLineCap(.butt)
                 context.setStrokeColor(CGColor(gray:210/255.0,alpha:1));context.setLineWidth(2);context.addPath(cursor);context.strokePath()
                 context.setStrokeColor(CGColor(gray:30/255.0,alpha:1));context.setLineWidth(0.8);context.addPath(cursor);context.strokePath();context.restoreGState()
-            } else if (48...57).contains(kind) {
-                let glyph=SharpTextRecognizer.Glyph(1,6,8,kind,Array(repeating:0,count:8))
+            } else if (48...57).contains(kind) || (120...122).contains(kind) {
+                let glyph=plotGlyphs[kind]
                 if let path=outline(glyph) {
                     context.saveGState();context.translateBy(x:x,y:y);context.clip(to:CGRect(x:0,y:0,width:6,height:8))
                     context.setFillColor(CGColor(gray:210/255.0,alpha:1));context.fill(CGRect(x:0,y:0,width:6,height:8))

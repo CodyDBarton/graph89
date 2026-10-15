@@ -86,7 +86,7 @@ public class TIEmuThread extends EmulatorThread implements Runnable
 
 					// HD progress follows a ~60 Hz display cadence. Subtract the
                     // snapshot work instead of adding a full delay after it.
-                    int interval = skin.Screen.useHDPlot() ? 16 : TIEmuThread.ScreenLoopSleep;
+                    int interval = skin.Screen.useHDPlot() ? skin.Screen.hdFrameInterval(Activity.getWindowManager().getDefaultDisplay().getRefreshRate()) : TIEmuThread.ScreenLoopSleep;
                     long remaining = interval * 1_000_000L - (System.nanoTime() - frameStart);
                     if(remaining > 0) Thread.sleep(remaining / 1_000_000L, (int)(remaining % 1_000_000L));
                     else Thread.sleep(1);

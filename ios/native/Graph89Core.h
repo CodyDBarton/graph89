@@ -22,6 +22,10 @@ int graph89_copy_hd_plot(const uint8_t *screen,float *points,int capacity,uint8_
 int graph89_copy_font_templates(uint8_t *templates);
 int graph89_save(const char *path);
 int graph89_restore(const char *path);
+int graph89_copy_camera(double *meta);
+int graph89_copy_mesh(float *vertices,uint32_t *edges,double *meta,int previous_generation);
+double graph89_rotation_time(void);
+void graph89_smooth_rotation(int enabled);
 void graph89_stop(void);
 #ifdef __cplusplus
 }

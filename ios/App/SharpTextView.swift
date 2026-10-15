@@ -8,6 +8,14 @@ final class SharpTextView: UIView {
         didSet { if enabled != oldValue { cells=[]; recognize(); setNeedsDisplay() } }
     }
     var compact = false { didSet { setNeedsDisplay() } }
+    private var metal:Smooth3DView?
+    private var skippedGraphRecognition=0
+    private var paintMillis=0.0
+    var recognitionMillis=0.0
+    var imageMillis=0.0
+    var snapshotMillis=0.0
+    var snapshotPhases=""
+    private var ownsCamera:Bool {metal?.ownsCamera == true}
     private var plot:[Float]=[]
     private var plotBackground=Data()
     private var plotDecorations:[Float]=[]
@@ -19,7 +27,7 @@ final class SharpTextView: UIView {
     private var cells: [SharpTextRecognizer.Cell]=[]
     private var font: CTFont?
     private var family = CGRect.null
-    private let plotNumbers=(48...57).map { SharpTextRecognizer.Glyph(1,6,8,$0,Array(repeating:0,count:8)) }
+    private let plotNumbers=(0..<128).map { SharpTextRecognizer.Glyph(1,6,8,$0,Array(repeating:0,count:8)) }
     private var paths: [ObjectIdentifier: CGPath]=[:]
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -32,6 +40,20 @@ final class SharpTextView: UIView {
             if !family.isNull { font=face }
         }
     }
+    override func layoutSubviews(){super.layoutSubviews();metal?.frame=bounds}
+    func cameraKey(_ key:Int,pressed:Bool) {
+        let owned=ownsCamera;metal?.key(key,pressed:pressed)
+        if owned && !ownsCamera {original=Data()}
+    }
+    var requestCamera:(()->Void)?
+    func updateCamera(_ sample:[Double]) {metal?.updateCamera(sample)}
+    func updateMesh(_ frame:MeshFrame?,background:Data,bounds:[Float]) {
+        if metal==nil, frame != nil {metal=Smooth3DView.make();if let metal {metal.frame=self.bounds;addSubview(metal);metal.configureLabels((120...122).map {outline(plotNumbers[$0])});metal.requestCamera = { [weak self] in self?.requestCamera?() }}}
+        let wasMetal=metal?.valid == true,wasOwned=ownsCamera
+        metal?.update(frame,background:background,bounds:bounds)
+        if wasOwned && !ownsCamera {original=Data()}
+        if wasMetal != (metal?.valid == true) {setNeedsDisplay()}
+    }
     required init?(coder:NSCoder) { fatalError("init(coder:) is not supported") }
     func configure(_ data: Data) {
         recognizer = data.count==3*256*12 ? SharpTextRecognizer(Array(data)) : nil
@@ -39,17 +61,27 @@ final class SharpTextView: UIView {
     }
     func update(_ data: Data, retained packets: [Int32]? = nil) {
         let next = packets ?? retained
+        // The host owns the entire 3D plot while it moves. Native curve pixels
+        // changing underneath it do not require another font-recognition pass.
+        if ownsCamera,data.count==16000,original.count==16000,
+           data.prefix(16*160)==original.prefix(16*160),data.suffix(7*160)==original.suffix(7*160) {
+            original=data;retained=next;skippedGraphRecognition+=1;return
+        }
         if data == original && next == retained { return }
         retained=next
         guard data.count==160*100 else { cells=[]; setNeedsDisplay(); return }
-        original=data; pixels=SharpTextRecognizer.withoutCursor(data.map {$0==30},retained); recognize(); setNeedsDisplay()
+        original=data; pixels=SharpTextRecognizer.withoutCursor(data.map {$0==30},retained)
+        // Even when toolbar/status pixels change, do not search the moving
+        // native wireframe for text. The Metal layer owns this entire area.
+        if ownsCamera {for i in (16*160)..<(93*160) {pixels[i]=false}}
+        recognize();setNeedsDisplay()
     }
     private func sameGeometry(_ lhs:[Float],_ rhs:[Float])->Bool {
         lhs.count==rhs.count && zip(lhs,rhs).allSatisfy { $0.0 == $0.1 || ($0.0.isNaN && $0.1.isNaN) }
     }
     func updatePlot(_ next:[Float],background:Data,decorations:[Float]) {
-        if sameGeometry(next,plot) && background==plotBackground && sameGeometry(decorations,plotDecorations) {return}
-        plot=next;plotBackground=background;plotDecorations=decorations;setNeedsDisplay()
+        let changed = !sameGeometry(next,plot) || background != plotBackground || !sameGeometry(decorations,plotDecorations)
+        if changed {plot=next;plotBackground=background;plotDecorations=decorations;if !ownsCamera {setNeedsDisplay()}}
         if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {
             accessibilityIdentifier="Sharp text rendering"
             accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"+readoutDiagnostics
@@ -63,12 +95,15 @@ final class SharpTextView: UIView {
             guard left<right,top<bottom else {return false}
             return (top..<bottom).allSatisfy {y in (left..<right).allSatisfy {x in plotBackground[y*160+x]&2 != 0}}
         }
-        return ";readouts:\(readouts.count);theta:\(readouts.filter {$0.glyph.character==SharpTextRecognizer.special(136)}.count);readoutsComplete:\(complete ? 1:0);thetaCursor:\(readouts.filter {$0.glyph.character==SharpTextRecognizer.special(136) && nativeCursor($0)}.count)"
+        let rotation=stride(from:0,to:plotDecorations.count,by:4).first {plotDecorations[$0].isNaN && plotDecorations[$0+1] == -9}
+        let active=metal?.valid == true ? (metal!.rotating ? 1:0) : rotation.map {Int(plotDecorations[$0+2])} ?? 0
+        let axisLabels=metal?.valid == true ? metal!.labelCount : stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && (120...122).contains(Int(plotDecorations[$0+1]))}.count
+        return ";recognitionMs:\(recognitionMillis);imageMs:\(imageMillis);\(snapshotPhases);paintMs:\(paintMillis);snapshotMs:\(snapshotMillis);recognitionSkipped:\(skippedGraphRecognition);hostFrames:\(metal?.hostFrames ?? 0);fastCamera:\(metal?.fastCameraSamples ?? 0);apdPrevented:\(metal?.apdPrevented ?? 0);changedPoses:\(metal?.changedPoses ?? 0);\(metal?.presentationDiagnostics ?? "presentedFPS:0;presentedP95ms:0");gpuFrames:\(metal?.drawnFrames ?? 0);gpuSeconds:\(metal?.drawSeconds ?? 0);rotation:\(active);axisLabels:\(axisLabels);readouts:\(readouts.count);theta:\(readouts.filter {$0.glyph.character==SharpTextRecognizer.special(136)}.count);readoutsComplete:\(complete ? 1:0);thetaCursor:\(readouts.filter {$0.glyph.character==SharpTextRecognizer.special(136) && nativeCursor($0)}.count)"
     }
     private var vectorCursorCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && plotDecorations[$0+1] >= -4 && plotDecorations[$0+1] <= -1}.count}
-    private var plotNumberCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && plotDecorations[$0+1]>=48}.count}
+    private var plotNumberCount:Int {stride(from:0,to:plotDecorations.count,by:4).filter {plotDecorations[$0].isNaN && (48...57).contains(Int(plotDecorations[$0+1]))}.count}
     private func drawPlot(_ context:CGContext) {
-        guard plot.count>6,plotBackground.count==16000 else {return}
+        guard metal?.valid != true,plot.count>6,plotBackground.count==16000 else {return}
         context.saveGState()
         context.clip(to:CGRect(x:CGFloat(plot[0]),y:CGFloat(plot[1]),width:CGFloat(plot[2]-plot[0]),height:CGFloat(plot[3]-plot[1])))
         // Preserve native interaction overlays already drawn with sharp text.
@@ -148,8 +183,8 @@ final class SharpTextView: UIView {
                 context.setLineCap(.butt)
                 context.setStrokeColor(UIColor(white:210/255.0,alpha:1).cgColor);context.setLineWidth(2);context.addPath(cursor);context.strokePath()
                 context.setStrokeColor(UIColor(white:30/255.0,alpha:1).cgColor);context.setLineWidth(0.8);context.addPath(cursor);context.strokePath();context.restoreGState()
-            } else if (48...57).contains(kind) {
-                let glyph=plotNumbers[kind-48]
+            } else if (48...57).contains(kind) || (120...122).contains(kind) {
+                let glyph=plotNumbers[kind]
                 if let path=outline(glyph) {
                     context.saveGState();context.translateBy(x:x,y:y);context.clip(to:CGRect(x:0,y:0,width:6,height:8))
                     context.setFillColor(UIColor(white:210/255.0,alpha:1).cgColor);context.fill(CGRect(x:0,y:0,width:6,height:8))
@@ -168,7 +203,7 @@ final class SharpTextView: UIView {
     private func recognize() {
         if ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") {accessibilityIdentifier="Sharp text rendering";accessibilityValue="plot:\(max(0,(plot.count-4)/2));axes:\(plotDecorations.count/4-vectorCursorCount-plotNumberCount);cursorVector:\(vectorCursorCount);plotNumbers:\(plotNumberCount);cursorProtected:\(plotBackground.filter { $0&4 != 0 }.count)"+readoutDiagnostics;if !enabled {cells=[];fallback=[];return}}
         guard enabled, font != nil, pixels.count==160*100, let recognizer else { cells=[]; fallback=[]; accessibilityHint="retained:0"; accessibilityValue = "off:0"; return }
-        fallback=recognizer.stable(pixels,fallback)
+        fallback=recognizer.stable(pixels,fallback,graphChromeOnly:ownsCamera)
         cells=recognizer.retained(retained,fallback:fallback)
         if ProcessInfo.processInfo.arguments.contains("--ui-test") {
             accessibilityIdentifier="retained:\(recognizer.retainedCount(retained))"
@@ -359,6 +394,8 @@ final class SharpTextView: UIView {
         return false
     }
     override func draw(_ rect:CGRect) {
+        let started=CACurrentMediaTime()
+        defer {paintMillis=(CACurrentMediaTime()-started)*1000}
         guard enabled || !plot.isEmpty, let context=UIGraphicsGetCurrentContext(), pixels.count==160*100 else { return }
         // Clear in native pixel coordinates before scaling. Erasing separately
         // above a UIImageView can leave subpixel fragments at fractional zoom.

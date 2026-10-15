@@ -25,6 +25,9 @@ static unsigned char templates[3*256*12];
 static void observe(unsigned pc){
  unsigned sp=m68k_areg(regs,7),a=sp+4;
  for(int k=0;k<32;k++)if(pending[k].pc && ((pc==pending[k].pc&&sp==pending[k].sp)||sp>pending[k].sp))pending[k].pc=0;
+ if(pc==rom(0x1e) && !strcmp(phase,"format-open")) {
+  unsigned r=lng(a+4);fprintf(sequence,"WINOPEN %x flags %x rect",lng(a),word(a+8));for(int i=0;i<4;i++)fprintf(sequence," %d",(short)word(r+i*2));fputc('\n',sequence);
+ }
  if(lng(port_slot)!=tihw.lcd_adr)return;
  int f=byte(font_slot);if(f<0||f>2)return;
  for(int k=0;k<3;k++)if(pc==chars[k]){
@@ -65,6 +68,27 @@ int main(int argc,char **argv){
   graph89_type_text("1/sin(x^2)\n(12345+67890)^2\nsqrt(2)\nlcm(20,30,40)\n");
   begin("queued-lcm-error");fprintf(sequence," wait\n");run(100000000);capture(1);
   tap("queued-lcm-dismiss",TIKEY_ESCAPE);tap("queued-lcm-clear",TIKEY_CLEAR);tap("queued-lcm-select",TIKEY_UP);
+  fclose(sequence);graph89_instruction_trace=0;printf("%u actions; %u intermediate/settled frames\n",action,serial);graph89_stop();return 0;
+ }
+ if(argc>3 && (!strcmp(argv[3],"rotation") || !strcmp(argv[3],"rotation-format"))) {
+  type("rotation-mode","setMode(\"Graph\",\"3D\")\nsetGraph(\"Style\",\"Wire Frame\")\nsetGraph(\"Axes\",\"Axes\")\nsetGraph(\"Labels\",\"On\")\n");
+  combo("rotation-editor",TIKEY_DIAMOND,TIKEY_F1);tap("rotation-clear",TIKEY_CLEAR);
+  type("rotation-equation","sin(x)*cos(y)");tap("rotation-enter",TIKEY_ENTER1);
+  combo("rotation-graph",TIKEY_DIAMOND,TIKEY_F3);run(180000000);
+  for(int i=0;i<400 && graph89_is_busy();i++)run(10000000);
+  begin("rotation-ready");capture(1);
+  if(!strcmp(argv[3],"rotation-format")) {
+   tap("format-tools",TIKEY_F1);tap("format-open",TIKEY_9);
+   begin("format-idle");run(12000000);capture(1);
+   tap("format-close",TIKEY_ESCAPE);begin("format-restored");run(12000000);capture(1);
+   fclose(sequence);graph89_instruction_trace=0;printf("%u actions; %u intermediate/settled frames\n",action,serial);graph89_stop();return 0;
+  }
+  begin("rotation-hold");graph89_key(TIKEY_RIGHT,1);
+  for(int i=0;i<96;i++){graph89_cursor_test_time+=1.0/120;run(200000);capture(1);}
+  graph89_key(TIKEY_RIGHT,0);begin("rotation-auto");
+  for(int i=0;i<240;i++){graph89_cursor_test_time+=1.0/120;run(200000);capture(1);}
+  tap("rotation-stop",TIKEY_ESCAPE);
+  begin("rotation-stopped");for(int i=0;i<30;i++){graph89_cursor_test_time+=1.0/120;run(200000);capture(1);}
   fclose(sequence);graph89_instruction_trace=0;printf("%u actions; %u intermediate/settled frames\n",action,serial);graph89_stop();return 0;
  }
  if(argc>3 && !strcmp(argv[3],"catalog-help")) {

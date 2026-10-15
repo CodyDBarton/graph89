@@ -243,3 +243,17 @@ notifications cannot invalidate a new foreground engine.
 
 `--haptic-log` validates all 1–250 ms patterns on the actual device and records
 manual key presses without automatically triggering any pulses.
+
+Smooth 3D rotation prototype retains the TI-89 mesh and generates intermediate
+views using a cached mesh and Metal camera at display cadence. Emulator/text
+snapshots stay at 30 Hz. Hardware smoothness remains subject to device testing. Wireframe with AXES or OFF is supported; BOX and other styles use the
+existing rendering. Enable native axes with Graph F1 → 9: Format → Axes = AXES,
+Labels = ON, then F4 ReGraph. ESC cancels interpolation. See tools/rotation.
+
+Configuration Settings → Metal 3D Rotation switches live between the GPU
+renderer (default on) and the previous HD renderer. HD Plotting stays enabled
+for a direct comparison. The preference persists between launches.
+
+Automatic calculator power-down is disabled for the supported Titanium AMS
+3.10 ROM. Manual 2nd → ON (OFF) still works. This prevents accelerated guest
+timers from blanking the LCD during continuous 3D rotation.

@@ -33,7 +33,7 @@ final class SharpTextRenderer {
     private final boolean available;
     private final RectF familyBounds = new RectF();
 
-    private final SharpTextRecognizer.Glyph[] plotNumbers=new SharpTextRecognizer.Glyph[10];
+    private final SharpTextRecognizer.Glyph[] plotNumbers=new SharpTextRecognizer.Glyph[128];
     private static Typeface approvedTypeface;
     static void initialize(Context context) {
         if (approvedTypeface == null)
@@ -107,9 +107,9 @@ final class SharpTextRenderer {
     }
 
     void drawPlotNumber(Canvas canvas,int code,float x,float y,int on,int off) {
-        if(!available)return;
-        SharpTextRecognizer.Glyph glyph=plotNumbers[code-48];
-        if(glyph==null)plotNumbers[code-48]=glyph=new SharpTextRecognizer.Glyph(1,6,8,(char)code,new int[8]);
+        if(!available || code<0 || code>=128)return;
+        SharpTextRecognizer.Glyph glyph=plotNumbers[code];
+        if(glyph==null)plotNumbers[code]=glyph=new SharpTextRecognizer.Glyph(1,6,8,(char)code,new int[8]);
         int saved=canvas.save();canvas.translate(x,y);canvas.clipRect(0,0,6,8);
         background.setColor(off);canvas.drawRect(0,0,6,8,background);
         ink.setColor(on);ink.setStyle(Paint.Style.FILL);canvas.drawPath(outline(glyph),ink);

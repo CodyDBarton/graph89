@@ -24,6 +24,11 @@ final class HDPlotRenderer {
             decorations=points!=null&&points.length>0?EmulatorActivity.nativeTiEmuGetHDPlotDecorations():new float[0];
         } finally { TIEmuFrameAccess.lock.unlock(); }
     }
+    boolean isSmoothRotating() {
+        if(decorations==null)return false;
+        for(int i=0;i+3<decorations.length;i+=4)if(Float.isNaN(decorations[i])&&decorations[i+1]==-9&&decorations[i+2]>0)return true;
+        return false;
+    }
     byte[] overlayMask() { return isActive()?background:null; }
     boolean isActive() { return points!=null && points.length>=8; }
     void draw(Canvas canvas,Rect destination,int on,int off) {

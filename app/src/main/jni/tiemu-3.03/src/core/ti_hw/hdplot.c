@@ -9,6 +9,7 @@
 #include "libuae.h"
 #include "hdplot.h"
 #include "hdtext.h"
+#include "hdrotation.h"
 #include "kbd.h"
 #define MAX_POINTS 32768
 #define MAX_DECORATIONS 16384
@@ -25,6 +26,20 @@ static int mesh_pending,mesh_projected,mesh_override,mesh_finished,mesh_discard,
 static uint32_t mesh_scene_return,mesh_scene_sp,mesh_root_return,mesh_root_sp,graph_clear_site,mesh_draw_clear_site,mesh_axes_call[3],mesh_axis_return,mesh_axis_sp;
 static uint8_t mesh_original_grid[20];
 static float mesh_xy[MAX_MESH_VERTICES*2];
+static float mesh_world[MAX_MESH_VERTICES*3],smooth_world[MAX_MESH_VERTICES*3];
+static uint32_t smooth_edges[MAX_POINTS/3*2];
+static int smooth_blocked,smooth_enabled;
+static unsigned smooth_generation;
+static uint32_t modal_open,modal_close;
+static uint32_t apd_expired,apd_return,apd_sp;
+static unsigned apd_prevented;
+typedef struct {uint32_t win,close_pc,close_sp;int l,t,r,b;} Modal;
+static Modal modals[8];
+static int camera_candidate_valid,smooth_valid,smooth_vertices,smooth_edge_count,smooth_axes,smooth_labels,smooth_export;
+static HDCamera camera_candidate,smooth_from,smooth_to,smooth_display;
+static double smooth_started,smooth_duration,smooth_last_time;
+static float smooth_axis_world[3][2][3];
+static unsigned smooth_frames,smooth_native_frames;
 static double plot_zmin,plot_zmax;
 static uint32_t field_site,field_return,field_sp;static int field_count;static uint8_t field_base[16000];
 static uint32_t ode_grid,ode_return,ode_sp;static int ode_override,ode_recovered;static uint8_t ode_original[40];
@@ -136,6 +151,66 @@ static int mesh_points(void){
  }
  return 1;
 }
+static HDCamera smooth_camera(double now){
+ double t=smooth_duration>0?(now-smooth_started)/smooth_duration:1;
+ return hd_camera_mix(smooth_from,smooth_to,t);
+}
+static void smooth_commit(void){
+ if(!camera_candidate_valid)return;
+ uint32_t gv=long_at(window_slot),db=gv+0x2b6,nv=long_at(db),ne=long_at(db+6),edges=heap_pointer(word_at(db+10));
+ if(!nv || nv>MAX_MESH_VERTICES || !edges || ne>MAX_POINTS/3)return;
+ int same=smooth_valid && smooth_vertices==(int)nv && !memcmp(smooth_world,mesh_world,nv*3*sizeof(float));
+ int edge_count=0;
+ for(unsigned i=0;i<ne;i++) {
+  uint32_t u=long_at(edges+i*8),v=long_at(edges+i*8+4);if(u==UINT32_MAX||v==UINT32_MAX)continue;
+  if(u>=nv||v>=nv){smooth_valid=0;return;}
+  if(edge_count>=smooth_edge_count || smooth_edges[edge_count*2]!=u || smooth_edges[edge_count*2+1]!=v)same=0;
+  smooth_edges[edge_count*2]=u;smooth_edges[edge_count*2+1]=v;edge_count++;
+ }
+ if(edge_count!=smooth_edge_count)same=0;
+ if(!same)smooth_generation++;
+ double now=cursor_time();HDCamera previous=smooth_camera(now);
+
+ double elapsed=now-smooth_last_time;
+ /* Matrix interpolation wraps naturally at 360 degrees. Large camera jumps,
+    graph changes and non-arrow commands deliberately snap to the guest view. */
+ if(smooth_blocked || !same || elapsed<=0 || elapsed>0.5 || hd_dot(previous.row[0],camera_candidate.row[0])<0.5) {
+  smooth_from=smooth_to=camera_candidate;smooth_duration=0;
+ }else {
+  smooth_from=previous;smooth_to=camera_candidate;smooth_duration=fmax(1.0/120,fmin(0.25,elapsed));
+ }
+ smooth_started=smooth_last_time=now;smooth_valid=1;smooth_vertices=nv;smooth_edge_count=edge_count;
+ memcpy(smooth_world,mesh_world,nv*3*sizeof(float));smooth_native_frames++;
+ uint32_t modes=long_at(gv+0x23e);unsigned formats=word_at(modes);
+ /* Verified by actual setGraph commands on AMS 3.10: AXES=0, BOX=8,
+    OFF=16 in bits 3..4; bit 2 enables Labels. */
+ int axes_mode=formats&24;
+ int retained_axes=same && smooth_axes;
+ smooth_axes=axes_mode==0 && !decoration_bad && (decoration_count==3 || retained_axes);
+ smooth_labels=smooth_axes && (formats&4)!=0;
+ if(smooth_axes && decoration_count==3){
+  float origin[3]={-(xmin+xmax)/(xmax-xmin),-(ymin+ymax)/(ymax-ymin),-(plot_zmin+plot_zmax)/(plot_zmax-plot_zmin)},screen_origin[2];
+  hd_project(camera_candidate,origin,screen_origin);
+  for(int k=0;k<3;k++) {
+   double vx=camera_candidate.sx*camera_candidate.row[0][k],vy=camera_candidate.sy*camera_candidate.row[1][k],den=vx*vx+vy*vy;
+   if(den<1e-6){smooth_axes=0;break;}
+   for(int end=0;end<2;end++) {
+    memcpy(smooth_axis_world[k][end],origin,sizeof origin);
+    double dx=decorations[k*4+end*2]-0.5-screen_origin[0],dy=decorations[k*4+end*2+1]-0.5-screen_origin[1];
+    smooth_axis_world[k][end][k]+=(dx*vx+dy*vy)/den;
+   }
+  }
+ }
+}
+static void smooth_points(float *out){
+ smooth_display=smooth_camera(cursor_time());int j=4;
+ for(int i=0;i<smooth_edge_count;i++) {
+  out[j++]=NAN;out[j++]=NAN;
+  hd_project(smooth_display,smooth_world+smooth_edges[i*2]*3,out+j);j+=2;
+  hd_project(smooth_display,smooth_world+smooth_edges[i*2+1]*3,out+j);j+=2;
+ }
+ smooth_frames++;
+}
 static void initialize(void) {
  if(ready||!tihw.rom)return;ready=1;
  if(tihw.calc_type!=TI89t || strcmp(tihw.rom_version,"3.10"))return;
@@ -200,7 +275,7 @@ static void initialize(void) {
  watch(field_site);
  watch(mesh_project);
  watch(param_call);watch(polar_call);watch(param_site);watch(polar_site);float_line_call=rom_call(0x1be);watch(float_line_call);
- supported=1;watch(evaluator);watch(win_clear);watch(first_site);watch(next_site);
+ supported=1;apd_expired=rom_call(0xf3);watch(apd_expired);modal_open=rom_call(0x1e);modal_close=rom_call(0xb);watch(modal_open);watch(modal_close);watch(evaluator);watch(win_clear);watch(first_site);watch(next_site);
  uint32_t port_restore=rom_call(0x1a3);
  if(word_at(port_restore)==0x23fc && long_at(port_restore+2)==0x4c00){
   port_slot=long_at(port_restore+6);
@@ -209,6 +284,25 @@ static void initialize(void) {
 }
 void hdplot_observe(uint32_t pc) {
  uint32_t sp=m68k_areg(regs,7),a=sp+4;
+ /* Auto Power Down is deliberately disabled for this app. Let AMS run
+    OSTimerExpired normally, then report only timer 2 (APD) as not expired.
+    Other timers, manual OFF and the ROM/guest stack are unchanged. */
+ if(apd_return && sp>apd_sp+4)apd_return=0;
+ if(apd_return && pc==apd_return && sp==apd_sp+4) {
+  if(m68k_dreg(regs,0)&65535)apd_prevented++;
+  m68k_dreg(regs,0)=0;apd_return=0;
+ }
+ if(pc==apd_expired && word_at(a)==2) {
+  apd_return=long_at(sp);apd_sp=sp;watch(apd_return);
+ }
+ for(int i=0;i<8;i++)if(modals[i].close_pc && ((pc==modals[i].close_pc&&sp==modals[i].close_sp)||sp>modals[i].close_sp))modals[i].win=modals[i].close_pc=0;
+ if(pc==modal_open && (word_at(a+8)&0x10)) {
+  uint32_t win=long_at(a),rect=long_at(a+4);int l=(short)word_at(rect),t=(short)word_at(rect+2),r=(short)word_at(rect+4),b=(short)word_at(rect+6);
+  if(l>0 && t>0 && l<r && t<b && r<160 && b<100 && b>=16 && t<94)
+   for(int i=0;i<8;i++)if(!modals[i].win || modals[i].win==win){modals[i]=(Modal){win,0,0,l,t,r+1,b+1};break;}
+ }
+ if(pc==modal_close)for(int i=0;i<8;i++)if(modals[i].win==long_at(a)){modals[i].close_pc=long_at(sp);modals[i].close_sp=sp+4;watch(modals[i].close_pc);}
+
  if(hold_counter && held_arrow>=0 && !hold_started_repeat && tihw.on_off){
   for(int k=0;k<hold_sites;k++)if(pc==hold_decrement[k]){
    int delay=cursor_time()<held_since+0.35?2:1;
@@ -244,11 +338,12 @@ void hdplot_observe(uint32_t pc) {
  if(enabled && pc==win_clear){
   uint32_t gv=long_at(window_slot),win=gv+0x246<tihw.ram_size?long_at(gv+0x242):0,range=gv+164<tihw.ram_size?long_at(gv+160):0,modes=gv+0x242<tihw.ram_size?long_at(gv+0x23e):0;
   if(mesh_project && mesh_heap_slot && byte_at(gv+0x319)==5 && graph_clear_site && (long_at(sp)==graph_clear_site || mesh_pending) && long_at(a)==win && range+180<tihw.ram_size && modes+8<tihw.ram_size && byte_at(modes+6)==0){
+   if(long_at(sp)==graph_clear_site){trace_requested=trace_mode=0;}
    if(long_at(sp)==graph_clear_site && !mesh_override){double xg=number_at(range+20),yg=number_at(range+50);
     if(xg>=1&&xg<=63&&yg>=1&&yg<=63){mesh_grid=range;memcpy(mesh_original_grid,tihw.ram+range+20,10);memcpy(mesh_original_grid+10,tihw.ram+range+50,10);
      put_number(range+20,fmin(63,ceil(xg*factor)));put_number(range+50,fmin(63,ceil(yg*factor)));mesh_override=1;}
    }
-   if(!mesh_pending){mesh_axis_sp=0;mesh_projected=mesh_finished=mesh_discard=0;for(int i=0;i<MAX_MESH_VERTICES*2;i++)mesh_xy[i]=NAN;}
+   if(!mesh_pending){camera_candidate_valid=0;mesh_axis_sp=0;mesh_projected=mesh_finished=mesh_discard=0;for(int i=0;i<MAX_MESH_VERTICES*2;i++)mesh_xy[i]=NAN;}
    if(long_at(sp)==graph_clear_site){mesh_clean_base=0;uint32_t frame=m68k_areg(regs,6);mesh_root_return=long_at(frame+4);mesh_root_sp=frame+8;watch(mesh_root_return);}
    if(long_at(sp)==mesh_draw_clear_site){uint32_t frame=m68k_areg(regs,6);mesh_scene_return=long_at(frame+4);mesh_scene_sp=frame+8;watch(mesh_scene_return);
    }
@@ -288,7 +383,7 @@ void hdplot_observe(uint32_t pc) {
  if(enabled && !mesh_pending && pc==mesh_project){
   uint32_t gv=long_at(window_slot),modes=gv+0x242<tihw.ram_size?long_at(gv+0x23e):0,db=m68k_areg(regs,3),nv=long_at(db),v=heap_pointer(word_at(db+4)),vertex=m68k_areg(regs,4),range=gv+164<tihw.ram_size?long_at(gv+160):0;
   if(byte_at(gv+0x319)==5 && modes+8<tihw.ram_size && byte_at(modes+6)==0 && db==gv+0x2b6 && nv>0&&nv<=MAX_MESH_VERTICES&&v>0&&v+nv*10<tihw.ram_size&&vertex>=v&&vertex<v+nv*10&&range+100<tihw.ram_size){
-   mesh_pending=1;mesh_projected=mesh_finished=mesh_discard=0;if(!complete)mesh_clean_base=0;for(int i=0;i<MAX_MESH_VERTICES*2;i++)mesh_xy[i]=NAN;
+   camera_candidate_valid=0;mesh_pending=1;mesh_projected=mesh_finished=mesh_discard=0;if(!complete)mesh_clean_base=0;for(int i=0;i<MAX_MESH_VERTICES*2;i++)mesh_xy[i]=NAN;
    building=1;plot_mode=5;decoration_count=0;bounds[0]=0;bounds[1]=16;bounds[2]=159;bounds[3]=93;
    xmin=number_at(range);xmax=number_at(range+10);ymin=number_at(range+30);ymax=number_at(range+40);plot_zmin=number_at(range+80);plot_zmax=number_at(range+90);
   }
@@ -297,7 +392,12 @@ void hdplot_observe(uint32_t pc) {
   uint32_t db=m68k_areg(regs,3),vertex=m68k_areg(regs,4),gv=long_at(window_slot);
   if(db==gv+0x2b6){uint32_t nv=long_at(db),v=heap_pointer(word_at(db+4));
    if(nv>0 && nv<=MAX_MESH_VERTICES && v>0 && v+nv*10<tihw.ram_size && vertex>=v && vertex<v+nv*10 && (vertex-v)%10==0){
-    unsigned index=(vertex-v)/10;double xx=0,yy=0;
+    if(!camera_candidate_valid) {
+     for(int r=0;r<2;r++)for(int k=0;k<3;k++)camera_candidate.row[r][k]=(short)word_at(db+0x1a+r*6+k*2)/16384.0;
+     camera_candidate.cx=(short)m68k_dreg(regs,5);camera_candidate.cy=16+(short)m68k_areg(regs,5);
+     camera_candidate.sx=(short)m68k_dreg(regs,6);camera_candidate.sy=(short)m68k_dreg(regs,7);camera_candidate_valid=1;
+    }
+    unsigned index=(vertex-v)/10;for(int k=0;k<3;k++)mesh_world[index*3+k]=(short)word_at(vertex+k*2)/16384.0;double xx=0,yy=0;
     for(int k=0;k<3;k++){double value=(short)word_at(vertex+k*2);xx+=value*(short)word_at(db+0x1a+k*2);yy+=value*(short)word_at(db+0x20+k*2);}
     mesh_xy[index*2]=(short)m68k_dreg(regs,5)+xx*(short)m68k_dreg(regs,6)/(16384.0*16384.0);
     mesh_xy[index*2+1]=16+(short)m68k_areg(regs,5)+yy*(short)m68k_dreg(regs,7)/(16384.0*16384.0);mesh_projected=1;
@@ -498,7 +598,8 @@ void hdplot_observe(uint32_t pc) {
 void hdplot_cursor_speed(int multiplier){pthread_mutex_lock(&lock);graph89_trace_repeat_factor=multiplier<1?1:multiplier>10?10:multiplier;pthread_mutex_unlock(&lock);}
 void hdplot_key_event(int key,int pressed){
  int arrow=key==TIKEY_LEFT || key==TIKEY_RIGHT || key==TIKEY_UP || key==TIKEY_DOWN;
- if(!arrow && pressed){graph_cursor_context=0;trace_mode=0;trace_requested=key==TIKEY_F3 && !ti68k_kbd_is_key_pressed(TIKEY_DIAMOND) && !ti68k_kbd_is_key_pressed(TIKEY_2ND) && !ti68k_kbd_is_key_pressed(TIKEY_SHIFT);}
+ if(arrow && pressed)smooth_blocked=0;
+ if(!arrow && pressed){smooth_blocked=1;smooth_from=smooth_to;smooth_duration=0;graph_cursor_context=0;trace_mode=0;trace_requested=key==TIKEY_F3 && !ti68k_kbd_is_key_pressed(TIKEY_DIAMOND) && !ti68k_kbd_is_key_pressed(TIKEY_2ND) && !ti68k_kbd_is_key_pressed(TIKEY_SHIFT);}
  if(arrow && pressed && held_arrow!=key){held_arrow=key;held_since=cursor_time();hold_started_repeat=0;}
  /* The ROM can still have the old arrow latched until its next matrix scan.
     Leaving our shortened countdown at 1 or 2 on release can create a ghost
@@ -520,7 +621,7 @@ void hdplot_run_begin(void){pthread_mutex_lock(&lock);initialize();}
 void hdplot_run_end(void){
  if(mesh_pending && mesh_finished){
   int valid=mesh_points();
-  if(valid){screen(reference);complete=!overflow;}else complete=0;
+  if(valid){smooth_commit();screen(reference);complete=!overflow;}else {complete=0;smooth_valid=0;}
   building=0;mesh_pending=0;mesh_root_return=mesh_root_sp=0;
   if(mesh_override && mesh_grid+60<tihw.ram_size){memcpy(tihw.ram+mesh_grid+20,mesh_original_grid,10);memcpy(tihw.ram+mesh_grid+50,mesh_original_grid+10,10);mesh_override=0;}
  }
@@ -535,9 +636,9 @@ void hdplot_enable(int on,int samples){pthread_mutex_lock(&lock);
  samples=samples<2?2:samples>16?16:samples;
  /* Complete a pending synthetic call before changing its factor or disabling. */
  if(!eval_active)factor=samples;
- if(enabled!=(on!=0)){enabled=on!=0;if(!(enabled&&loaded_cache)){complete=0;if(!eval_active){count=0;building=0;have_last=0;}}loaded_cache=0;}
+ if(enabled!=(on!=0)){smooth_valid=0;enabled=on!=0;if(!(enabled&&loaded_cache)){complete=0;if(!eval_active){count=0;building=0;have_last=0;}}loaded_cache=0;}
  hdplot_active=1;pthread_mutex_unlock(&lock);}
-void hdplot_reset(void){pthread_mutex_lock(&lock);ready=supported=count=building=complete=overflow=have_last=eval_active=loaded_cache=0;cursor_known=label_pending=navigation_cursor=navigation_label=0;eval_mode=plot_mode=1;curve_call=curve_xptr=param_site=polar_site=0;mesh_project=mesh_heap_slot=mesh_clear_return=mesh_pending=mesh_projected=mesh_override=mesh_finished=mesh_scene_return=mesh_scene_sp=mesh_discard=mesh_clean_base=mesh_root_return=mesh_root_sp=graph_clear_site=mesh_draw_clear_site=mesh_axis_sp=mesh_axis_return=0;mesh_axes_call[0]=mesh_axes_call[1]=mesh_axes_call[2]=0;ode_override=ode_recovered=ode_grid=ode_return=ode_sp=field_site=field_return=field_sp=field_count=0;memset(labels,0,sizeof labels);memset(prompt_glyphs,0,sizeof prompt_glyphs);prompt_pending=0;trace_toolbar_valid=trace_mode=trace_requested=trace_repeating=previous_size=0;graph_cursor_context=hold_sites=hold_counter=hold_initial=hold_started_repeat=0;held_arrow=-1;finish_site=0;axes_capturing=decoration_count=decoration_bad=0;axes_return=port_slot=axes_call=line_call=pix_call=0;memset(decoration_mask,0,sizeof decoration_mask);memset(hdplot_pages,0,sizeof hdplot_pages);hdplot_active=1;pthread_mutex_unlock(&lock);}
+void hdplot_reset(void){pthread_mutex_lock(&lock);memset(modals,0,sizeof modals);apd_expired=apd_return=apd_sp=apd_prevented=0;smooth_generation++;smooth_blocked=0;smooth_valid=smooth_export=camera_candidate_valid=0;smooth_frames=smooth_native_frames=0;smooth_duration=0;ready=supported=count=building=complete=overflow=have_last=eval_active=loaded_cache=0;cursor_known=label_pending=navigation_cursor=navigation_label=0;eval_mode=plot_mode=1;curve_call=curve_xptr=param_site=polar_site=0;mesh_project=mesh_heap_slot=mesh_clear_return=mesh_pending=mesh_projected=mesh_override=mesh_finished=mesh_scene_return=mesh_scene_sp=mesh_discard=mesh_clean_base=mesh_root_return=mesh_root_sp=graph_clear_site=mesh_draw_clear_site=mesh_axis_sp=mesh_axis_return=0;mesh_axes_call[0]=mesh_axes_call[1]=mesh_axes_call[2]=0;ode_override=ode_recovered=ode_grid=ode_return=ode_sp=field_site=field_return=field_sp=field_count=0;memset(labels,0,sizeof labels);memset(prompt_glyphs,0,sizeof prompt_glyphs);prompt_pending=0;trace_toolbar_valid=trace_mode=trace_requested=trace_repeating=previous_size=0;graph_cursor_context=hold_sites=hold_counter=hold_initial=hold_started_repeat=0;held_arrow=-1;finish_site=0;axes_capturing=decoration_count=decoration_bad=0;axes_return=port_slot=axes_call=line_call=pix_call=0;memset(decoration_mask,0,sizeof decoration_mask);memset(hdplot_pages,0,sizeof hdplot_pages);hdplot_active=1;pthread_mutex_unlock(&lock);}
 /* Keep calculator-owned cursors, coordinate readouts and popup menus above
    the cached vector scene. Bit 1 in the background marks native overlay pixels;
    renderers exclude these patches so the current LCD/text underneath remains
@@ -625,7 +726,7 @@ static int navigation_background(const uint8_t *pixels,uint8_t *background){
 int hdplot_copy(const uint8_t *pixels,float *out,int capacity,uint8_t *background){
  /* Preserve the CPU lock order (text before plot). Full validated glyph
     cells protect Trace text; polar/parametric readouts also occupy y=76. */
- hdtext_run_begin();pthread_mutex_lock(&lock);int n=0;navigation_cursor=navigation_label=0;
+ hdtext_run_begin();pthread_mutex_lock(&lock);int n=0;smooth_export=0;navigation_cursor=navigation_label=0;
  int live=building&&!overflow&&((plot_mode==5&&count>3)||(tihw.ram[tihw.lcd_adr+99*30+19]&1));
  int exported=count<3?3:count;
  if(enabled&&(complete||live)&&tihw.on_off&&count>0&&capacity>=exported*2+4){int valid=1;
@@ -654,17 +755,53 @@ int hdplot_copy(const uint8_t *pixels,float *out,int capacity,uint8_t *backgroun
    memcpy(out,bounds,sizeof bounds);
    if(plot_mode==5){uint32_t gv=long_at(window_slot),win=long_at(gv+0x242);int bottom=byte_at(win+19)+1;if(bottom<out[3] && bottom>=61)out[3]=bottom;}
    memcpy(out+4,points,count*2*sizeof(float));
+   if(smooth_enabled && plot_mode==5 && smooth_valid && smooth_edge_count*3==count && (word_at(long_at(long_at(window_slot)+0x23e))&24)!=8 && same_window() && !trace_mode && !trace_requested) {
+    smooth_points(out);smooth_export=1;
+    /* Retained axis labels belong to the old orientation. Render those with
+       their 3D axes; calculator popup/readout masks remain authoritative. */
+    if(smooth_axes)for(int i=16*160;i<93*160;i++)background[i]&=~1;
+   }
    for(int i=count*2;i<exported*2;i++)out[i+4]=NAN;
+   for(int k=0;k<8;k++)if(modals[k].win)for(int y=modals[k].t;y<modals[k].b;y++)for(int x=modals[k].l;x<modals[k].r;x++)background[y*160+x]|=2;
    n=exported*2+4;}}
  pthread_mutex_unlock(&lock);hdtext_run_end();return n;}
 
 int hdplot_copy_decorations(float *out,int capacity){pthread_mutex_lock(&lock);
  int n=enabled&&(complete||(building&&!overflow&&((plot_mode==5&&count>3)||(tihw.ram[tihw.lcd_adr+99*30+19]&1))))&&!decoration_bad&&capacity>=decoration_count*4?decoration_count*4:0;
  if(n)memcpy(out,decorations,n*sizeof(float));
+ if(smooth_export && smooth_axes && capacity>=24) {
+  n=0;
+  for(int k=0;k<3;k++) {
+   float a[2],b[2];hd_project(smooth_display,smooth_axis_world[k][0],a);hd_project(smooth_display,smooth_axis_world[k][1],b);
+   out[n++]=a[0]+0.5;out[n++]=a[1]+0.5;out[n++]=b[0]+0.5;out[n++]=b[1]+0.5;
+   if(smooth_labels && !modals[0].win && !modals[1].win && !modals[2].win){int positive=smooth_axis_world[k][0][k]>smooth_axis_world[k][1][k]?0:1;float *p=positive==0?a:b;
+    out[n++]=NAN;out[n++]=120+k;out[n++]=p[0]+2;out[n++]=p[1]+1;}
+  }
+ }
+ if(smooth_export && capacity>=n+4){out[n++]=NAN;out[n++]=-9;out[n++]=smooth_duration>0 && cursor_time()<smooth_last_time+0.5;out[n++]=smooth_native_frames;}
  if(plot_mode==5 && capacity>=n+4){out[n++]=NAN;out[n++]=-7;out[n++]=5;out[n++]=0;}
  if(navigation_cursor && capacity>=n+4){out[n++]=NAN;out[n++]=-navigation_cursor;out[n++]=cursor_x+cursor_size/2.0f;out[n++]=cursor_y+cursor_size/2.0f;}
  if(navigation_label)for(int k=0;k<4;k++)if(labels[k].visible && capacity>=n+4){out[n++]=NAN;out[n++]=labels[k].code;out[n++]=labels[k].x;out[n++]=labels[k].y;}
  pthread_mutex_unlock(&lock);return n;}
+
+double hdplot_rotation_time(void){return cursor_time();}
+void hdplot_smooth_rotation(int on){pthread_mutex_lock(&lock);smooth_enabled=on!=0;pthread_mutex_unlock(&lock);}
+int hdplot_copy_mesh(float *vertices,uint32_t *edges,double *meta,int previous_generation){
+ pthread_mutex_lock(&lock);int ok=enabled && smooth_valid && plot_mode==5 && same_window() && !trace_mode && !trace_requested && (word_at(long_at(long_at(window_slot)+0x23e))&24)!=8;
+ meta[50]=smooth_valid;meta[51]=plot_mode;meta[52]=same_window();meta[53]=trace_mode;meta[54]=trace_requested;meta[55]=word_at(long_at(long_at(window_slot)+0x23e));meta[56]=0;meta[58]=apd_prevented;
+ for(int i=0;i<8;i++)if(modals[i].win){ok=0;meta[56]++;}
+ if(ok){
+  meta[0]=smooth_generation;meta[1]=smooth_vertices;meta[2]=smooth_edge_count;meta[3]=smooth_labels;meta[4]=smooth_axes;meta[47]=smooth_last_time;
+  int j=5;for(int r=0;r<2;r++)for(int k=0;k<3;k++)meta[j++]=smooth_from.row[r][k];
+  meta[j++]=smooth_from.cx;meta[j++]=smooth_from.cy;meta[j++]=smooth_from.sx;meta[j++]=smooth_from.sy;
+  for(int r=0;r<2;r++)for(int k=0;k<3;k++)meta[j++]=smooth_to.row[r][k];
+  meta[j++]=smooth_to.cx;meta[j++]=smooth_to.cy;meta[j++]=smooth_to.sx;meta[j++]=smooth_to.sy;
+  meta[j++]=smooth_started;meta[j++]=smooth_duration;meta[j++]=smooth_last_time;
+  for(int k=0;k<3;k++)for(int end=0;end<2;end++)for(int axis=0;axis<3;axis++)meta[j++]=smooth_axis_world[k][end][axis];
+  if(vertices && edges && previous_generation!=(int)smooth_generation){memcpy(vertices,smooth_world,smooth_vertices*3*sizeof(float));memcpy(edges,smooth_edges,smooth_edge_count*2*sizeof(uint32_t));}
+ }
+ pthread_mutex_unlock(&lock);return ok;
+}
 
 /* A saved state may land inside an additional ROM evaluation. Retain only
    the continuation needed to finish that call and restore its original sample.

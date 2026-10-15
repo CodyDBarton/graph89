@@ -41,6 +41,7 @@ final class CalculatorController: UIViewController {
     private let keyHaptics = CalculatorHaptics()
     private let engine = CalculatorEngine()
     private var framePending = false
+    private var cameraPending = false
     private let engineMonitor = UILabel()
     private let hapticMonitor = UILabel()
     private let lcd = UIImageView()
@@ -67,6 +68,17 @@ final class CalculatorController: UIViewController {
         lcdBezel.addSubview(hdDisplay)
         hdDisplay.enabled = settings.sharpText
         hdDisplay.compact = settings.compactLayout
+        hdDisplay.requestCamera = { [weak self] in
+            guard let self,self.running,self.ready,self.settings.hdPlot,self.settings.metal3D,!self.cameraPending else {return}
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-30hz-camera") {return}
+            self.cameraPending=true
+            self.engine.camera { [weak self] sample in
+                guard let self else {return}
+                self.cameraPending=false
+                guard self.running,self.settings.hdPlot,self.settings.metal3D,let sample else {return}
+                self.hdDisplay.updateCamera(sample)
+            }
+        }
         lcd.isAccessibilityElement = true
         lcd.accessibilityLabel = "Calculator display"
         settingsButton.accessibilityLabel = "Configuration Settings"
@@ -149,7 +161,7 @@ final class CalculatorController: UIViewController {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             stateURL = folder.appendingPathComponent(ProcessInfo.processInfo.arguments.contains("--ui-test") ? "ui-test.state" : "titanium.state")
             let image = folder.appendingPathComponent("titanium.img")
-            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock, sharpText: settings.sharpText, hdPlot: settings.hdPlot, cursorSpeed: settings.graphCursorSpeed)
+            engine.configure(cpuPercent: settings.cpuPercent, overclock: settings.overclock, sharpText: settings.sharpText, hdPlot: settings.hdPlot, metal3D: settings.metal3D, cursorSpeed: settings.graphCursorSpeed)
             let arguments = ProcessInfo.processInfo.arguments
             engine.start(os: os.path, image: image.path, state: stateURL.path,
                          fresh: arguments.contains("--fresh-session"),
@@ -183,6 +195,7 @@ final class CalculatorController: UIViewController {
 
     private func setKey(_ key: Int, pressed: Bool) {
         guard ready else { return }
+        hdDisplay.cameraKey(key,pressed:pressed)
         engine.setKey(key, pressed: pressed)
     }
 
@@ -190,7 +203,7 @@ final class CalculatorController: UIViewController {
         let controller = ConfigurationController(settings: settings)
         controller.onChange = { [weak self] in
             guard let self else { return }
-            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText, hdPlot: self.settings.hdPlot, cursorSpeed: self.settings.graphCursorSpeed)
+            self.engine.configure(cpuPercent: self.settings.cpuPercent, overclock: self.settings.overclock, sharpText: self.settings.sharpText, hdPlot: self.settings.hdPlot, metal3D: self.settings.metal3D, cursorSpeed: self.settings.graphCursorSpeed)
             self.keyHaptics.configure(duration: self.settings.hapticDuration)
             self.hdDisplay.enabled = self.settings.sharpText
             self.hdDisplay.compact = self.settings.compactLayout
@@ -208,10 +221,17 @@ final class CalculatorController: UIViewController {
             guard let self else { return }
             self.framePending = false
             guard self.running else { return }
+            let snapshotStart=CACurrentMediaTime()
+            self.hdDisplay.updateMesh(frame.mesh,background:frame.plotBackground,bounds:frame.plot)
+            let meshEnd=CACurrentMediaTime()
             self.hdDisplay.updatePlot(frame.plot,background:frame.plotBackground,decorations:frame.plotDecorations)
+            let plotEnd=CACurrentMediaTime()
             self.refreshScreen(frame.pixels, retained: frame.retained)
+            let textEnd=CACurrentMediaTime()
+            self.hdDisplay.snapshotMillis=(textEnd-snapshotStart)*1000
+            self.hdDisplay.snapshotPhases="meshMs:\((meshEnd-snapshotStart)*1000);plotMs:\((plotEnd-meshEnd)*1000);textMs:\((textEnd-plotEnd)*1000)"
             if ProcessInfo.processInfo.arguments.contains("--ui-test") {
-                self.engineMonitor.accessibilityValue = "\(frame.normalIterations),\(frame.turboIterations),\(frame.busy ? 1 : 0)"
+                self.engineMonitor.accessibilityValue = "\(frame.normalIterations),\(frame.turboIterations),\(frame.busy ? 1 : 0),\(frame.on ? 1:0)"
             }
         }
     }
@@ -222,14 +242,18 @@ final class CalculatorController: UIViewController {
             let packets=stride(from:0,to:retained.count,by:12).map {Array(retained[$0..<$0+12])}
             if let json=try? JSONSerialization.data(withJSONObject:packets) {try? json.write(to:folder.appendingPathComponent("lcm-current.cells.json"))}
         }
+        let recognitionStart=CACurrentMediaTime()
         hdDisplay.update(data, retained: retained)
+        hdDisplay.recognitionMillis=(CACurrentMediaTime()-recognitionStart)*1000
         guard data != lastPixels else { return }
         lastPixels = data
         guard let provider = CGDataProvider(data: data as CFData),
               let image = CGImage(width: 160, height: 100, bitsPerComponent: 8, bitsPerPixel: 8,
                                   bytesPerRow: 160, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: [],
                                   provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else { return }
+        let imageStart=CACurrentMediaTime()
         lcd.image = UIImage(cgImage: image)
+        hdDisplay.imageMillis=(CACurrentMediaTime()-imageStart)*1000
         if ProcessInfo.processInfo.arguments.contains("--ui-test") {
             lcd.accessibilityValue = data.base64EncodedString()
         }
@@ -284,6 +308,7 @@ final class CalculatorEngine {
         let plot: [Float]
         let plotBackground: Data
         let plotDecorations:[Float]
+        let mesh:MeshFrame?
         let on: Bool
         let busy: Bool
         let normalIterations: UInt64
@@ -299,6 +324,7 @@ final class CalculatorEngine {
     private var keyInput = CalculatorKeyInput()
     private var wakeReleaseAt: CFTimeInterval = 0
     private var normalIterations: UInt64 = 0
+    private var meshGeneration = -1
     private var turboIterations: UInt64 = 0
 
     func start(os: String, image: String, state: String, fresh: Bool, benchmark: Bool,
@@ -335,6 +361,10 @@ final class CalculatorEngine {
                         graph89_type_text("setMode(\"Graph\",\"\(names[mode-1])\")\n")
                         graph89_run(30_000_000)
                     }
+                    if mode==5 && args.contains("--ui-test-rotation") {
+                        graph89_type_text("setGraph(\"Style\",\"Wire Frame\")\nsetGraph(\"Axes\",\"Axes\")\nsetGraph(\"Labels\",\"On\")\n")
+                        graph89_run(60_000_000)
+                    }
                     for key:Int32 in [82,6,49,56] {
                         graph89_key(key,1);graph89_run(400_000)
                         graph89_key(key,0);graph89_run(400_000)
@@ -360,10 +390,11 @@ final class CalculatorEngine {
             DispatchQueue.main.async { completion(error) }
         }
     }
-    func configure(cpuPercent: Int, overclock: Bool, sharpText: Bool, hdPlot: Bool, cursorSpeed: Int) {
+    func configure(cpuPercent: Int, overclock: Bool, sharpText: Bool, hdPlot: Bool, metal3D: Bool, cursorSpeed: Int) {
         queue.async {
             graph89_retained_text_enable(sharpText ? 1 : 0)
             graph89_hd_plot_enable(hdPlot ? 1 : 0,8)
+            self.metal3D = metal3D
             graph89_graph_cursor_speed(Int32(cursorSpeed))
             self.cpuPercent = cpuPercent
             self.overclock = overclock
@@ -455,6 +486,21 @@ final class CalculatorEngine {
         let drainInput = keyInput.hasPending && (heldKeys.isEmpty || CACurrentMediaTime() >= wakeReleaseAt)
         schedule(after: stillTurbo || drainInput ? 0 : normalDelay, generation: token)
     }
+    private var metal3D = true
+    private let cameraQueue=DispatchQueue(label:"com.codybarton.graph89.camera",qos:.userInteractive)
+    func camera(completion:@escaping ([Double]?)->Void) {
+        cameraQueue.async {
+            // This getter takes the native plot lock, but copies no LCD, text,
+            // geometry, or masks and never advances the emulated CPU.
+            var meta=[Double](repeating:0,count:64)
+            let available=graph89_copy_camera(&meta)
+            if available != 0 {
+                let offset=CACurrentMediaTime()-graph89_rotation_time()
+                meta[25]+=offset;meta[27]+=offset
+            }
+            DispatchQueue.main.async {completion(available != 0 ? meta:nil)}
+        }
+    }
     func frame(completion: @escaping (Frame) -> Void) {
         queue.async {
             var bytes = [UInt8](repeating: 210, count: 160 * 100)
@@ -466,7 +512,20 @@ final class CalculatorEngine {
             let plotCount=graph89_copy_hd_plot(&bytes,&plot,65540,&plotBackground)
             var decorations=[Float](repeating:0,count:65536)
             let decorationCount=plotCount>0 ? graph89_copy_hd_plot_decorations(&decorations,65536):0
-            let frame = Frame(pixels: Data(bytes), retained: Array(packets.prefix(Int(count) * 12)), plot:Array(plot.prefix(Int(plotCount))),plotBackground:Data(plotBackground),plotDecorations:Array(decorations.prefix(Int(decorationCount))),on: graph89_screen_is_on() != 0,
+            var mesh:MeshFrame?
+            if plotCount>0 && self.metal3D {
+                var vertices=[Float](repeating:0,count:4096*3),edges=[UInt32](repeating:0,count:32768),meta=[Double](repeating:0,count:64)
+                let available=graph89_copy_mesh(&vertices,&edges,&meta,Int32(self.meshGeneration))
+                if available != 0 {
+                    // CLOCK_MONOTONIC and Core Animation can differ after Mac
+                    // sleep. Transfer timestamp ages, never compare epochs.
+                    let offset=CACurrentMediaTime()-graph89_rotation_time()
+                    meta[25]+=offset;meta[27]+=offset
+                    let next=Int(meta[0]),changed=next != self.meshGeneration;self.meshGeneration=next
+                    mesh=MeshFrame(meta:meta,vertices:changed ? Array(vertices.prefix(Int(meta[1])*3)):nil,edges:changed ? Array(edges.prefix(Int(meta[2])*2)):nil)
+                }
+            }
+            let frame = Frame(pixels: Data(bytes), retained: Array(packets.prefix(Int(count) * 12)), plot:Array(plot.prefix(Int(plotCount))),plotBackground:Data(plotBackground),plotDecorations:Array(decorations.prefix(Int(decorationCount))),mesh:mesh,on: graph89_screen_is_on() != 0,
                               busy: graph89_is_busy() != 0, normalIterations: self.normalIterations,
                               turboIterations: self.turboIterations)
             DispatchQueue.main.async { completion(frame) }
@@ -867,6 +926,9 @@ final class CalculatorSettings {
     var compactLayout: Bool {
         didSet { defaults.set(compactLayout, forKey: "compactLayout") }
     }
+    var metal3D: Bool {
+        didSet { defaults.set(metal3D, forKey:"metal3D") }
+    }
     var hdPlot: Bool {
         didSet { defaults.set(hdPlot, forKey:"hdPlot") }
     }
@@ -888,15 +950,18 @@ final class CalculatorSettings {
         if testing && ProcessInfo.processInfo.arguments.contains("--reset-settings") {
             defaults.removePersistentDomain(forName: "com.codybarton.graph89.settings-tests")
         }
-        defaults.register(defaults: ["graphCursorSpeed": 3, "cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 30])
+        defaults.register(defaults: ["metal3D": true, "graphCursorSpeed": 3, "cpuPercent": 100, "overclockWhenBusy": true, "hapticDuration": 30])
         graphCursorSpeed = min(10, max(1, defaults.integer(forKey: "graphCursorSpeed")))
         hdPlot = defaults.bool(forKey:"hdPlot")
+        metal3D = defaults.bool(forKey:"metal3D")
         sharpText = defaults.bool(forKey: "sharpText")
         compactLayout = defaults.bool(forKey: "compactLayout") && sharpText
         cpuPercent = min(250, max(30, defaults.integer(forKey: "cpuPercent")))
         overclock = defaults.bool(forKey: "overclockWhenBusy")
         hapticDuration = min(250, max(0, defaults.integer(forKey: "hapticDuration")))
         stretchMode = StretchMode(rawValue: defaults.string(forKey: "stretchMode") ?? "") ?? .safeAspect
+        let args=ProcessInfo.processInfo.arguments
+        if testing,let index=args.firstIndex(of:"--ui-test-cpu-percent"),index+1<args.count,let percent=Int(args[index+1]) {cpuPercent=min(250,max(30,percent))}
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-hd-plot") { hdPlot = true }
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-sharp-text") { sharpText = true }
         if testing && ProcessInfo.processInfo.arguments.contains("--ui-test-compact-layout") { sharpText = true;compactLayout = true }
@@ -914,6 +979,7 @@ final class ConfigurationController: UIViewController {
     private let sharpSwitch = UISwitch()
     private let compactSwitch = UISwitch()
     private let plotSwitch = UISwitch()
+    private let metalSwitch = UISwitch()
     private let stretchButton = UIButton(type: .system)
     private let stretchDetail = UILabel()
     private let hapticSlider = UISlider()
@@ -1084,6 +1150,19 @@ final class ConfigurationController: UIViewController {
         plotDetail.font = .preferredFont(forTextStyle:.subheadline)
         plotDetail.textColor = .secondaryLabel;plotDetail.numberOfLines=0
         stack.addArrangedSubview(plotDetail)
+        let metalLabel=UILabel()
+        metalLabel.text="Metal 3D Rotation"
+        metalLabel.font = .preferredFont(forTextStyle:.headline)
+        metalLabel.numberOfLines=0
+        metalSwitch.accessibilityLabel="Metal 3D Rotation"
+        metalSwitch.addTarget(self,action:#selector(metalChanged),for:.valueChanged)
+        let metalRow=UIStackView(arrangedSubviews:[metalLabel,metalSwitch]);metalRow.spacing=12
+        stack.addArrangedSubview(metalRow)
+        let metalDetail=UILabel()
+        metalDetail.text="Use the GPU for smooth HD 3D wireframe rotation. Turn off to compare with the previous HD renderer. Requires HD Plotting."
+        metalDetail.font = .preferredFont(forTextStyle:.subheadline)
+        metalDetail.textColor = .secondaryLabel;metalDetail.numberOfLines=0
+        stack.addArrangedSubview(metalDetail)
         let reset = UIButton(type: .system)
         reset.setTitle("Restore Defaults", for: .normal)
         reset.addTarget(self, action: #selector(restoreDefaults), for: .touchUpInside)
@@ -1101,6 +1180,7 @@ final class ConfigurationController: UIViewController {
         sharpSwitch.isOn = settings.sharpText
         compactSwitch.isOn = settings.compactLayout
         plotSwitch.isOn = settings.hdPlot
+        metalSwitch.isOn = settings.metal3D
         hapticSlider.value = Float(settings.hapticDuration)
         let hapticText = settings.hapticDuration == 0 ? "Disabled" : "\(settings.hapticDuration) ms"
         hapticValue.text = hapticText
@@ -1148,12 +1228,17 @@ final class ConfigurationController: UIViewController {
         updateControls()
         onChange?()
     }
+    @objc private func metalChanged() {
+        settings.metal3D = metalSwitch.isOn
+        onChange?()
+    }
     @objc private func plotChanged() {
         settings.hdPlot = plotSwitch.isOn
         onChange?()
     }
     @objc private func restoreDefaults() {
         settings.hdPlot = false
+        settings.metal3D = true
         settings.compactLayout = false
         settings.sharpText = false
         settings.graphCursorSpeed = 3

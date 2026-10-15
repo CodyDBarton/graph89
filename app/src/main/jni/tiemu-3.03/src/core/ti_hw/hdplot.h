@@ -11,6 +11,9 @@ void hdplot_cursor_speed(int multiplier);
 void hdplot_run_end(void);
 void hdplot_observe(uint32_t pc);
 void hdplot_reset(void);
+double hdplot_rotation_time(void);
+void hdplot_smooth_rotation(int enabled);
+int hdplot_copy_mesh(float *vertices,uint32_t *edges,double *meta,int previous_generation);
 int hdplot_pending(void);
 void hdplot_save_pending(FILE *file);
 void hdplot_load_pending(FILE *file);
@@ -25,6 +28,8 @@ int hdplot_copy(const uint8_t *pixels,float *points,int capacity,uint8_t *backgr
    navigation overlay: kind -1 is the verified circle/cross cursor centre, -2 its blink-off phase;
    Kinds -3/-4 are the 21x21 held-arrow cursor visible/hidden phases.
    Kinds -5/-6 are graph point circles/squares; -7,5,0 marks a 3D scene.
+   Kind -9,active,nativePasses reports the host rotation state. ASCII 120..122
+   are the approved x/y/z axis labels.
    ASCII 48..57 is a 6x8 plot-number cell using the approved sharp font. Query only after a valid plot copy. */
 int hdplot_copy_decorations(float *segments,int capacity);
 #endif

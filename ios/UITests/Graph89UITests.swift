@@ -592,6 +592,163 @@ final class Graph89UITests: XCTestCase {
         let selected=XCTAttachment(screenshot:app.screenshot());selected.name="HD inverse trig inverted";selected.lifetime = .keepAlways;add(selected)
     }
 
+    func test3DRotationShortTapsAndStop() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-plot-mode","5","--ui-test-rotation","--ui-test-sharp-text","--ui-test-cpu-percent","100"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:30))
+        let status=app.staticTexts["Engine status"],overlay=app.otherElements["Sharp text rendering"]
+        expectation(for:NSPredicate {_,_ in (status.value as? String ?? "").split(separator:",").count==4},evaluatedWith:status)
+        waitForExpectations(timeout:30)
+        for key in ["DIAMOND","F3"] {tap(app,key)}
+        expectation(for:NSPredicate {_,_ in (overlay.value as? String ?? "").contains("axisLabels:3")},evaluatedWith:overlay)
+        waitForExpectations(timeout:45)
+        func changes()->Int {
+            Int((overlay.value as? String ?? "").components(separatedBy:"changedPoses:").last?.components(separatedBy:";").first ?? "-1") ?? -1
+        }
+        func assertSettled(_ label:String) {
+            Thread.sleep(forTimeInterval:1.5)
+            let count=changes()
+            Thread.sleep(forTimeInterval:0.8)
+            XCTAssertEqual(changes(),count,"\(label): released taps must not leave the camera drifting")
+            print("3D INPUT \(label): \(overlay.value as? String ?? "missing")")
+        }
+        for _ in 0..<5 {app.buttons["RIGHT"].tap()}
+        assertSettled("rapid taps")
+        app.buttons["RIGHT"].press(forDuration:0.8)
+        Thread.sleep(forTimeInterval:2)
+        XCTAssertTrue((overlay.value as? String ?? "").contains("rotation:1"))
+        app.buttons["RIGHT"].tap()
+        assertSettled("tap to stop")
+        for _ in 0..<4 {app.buttons["LEFT"].tap()}
+        assertSettled("taps after stop")
+        app.buttons["RIGHT"].press(forDuration:0.8)
+        Thread.sleep(forTimeInterval:2)
+        XCTAssertTrue((overlay.value as? String ?? "").contains("rotation:1"),"Holding must restart smooth rotation")
+        tap(app,"ESC")
+        assertSettled("Escape stop")
+        app.terminate()
+    }
+
+    func testCameraMotionCPUComparison() {
+        cameraComparison(host:true,onlyHost:true,cpuPercent:100)
+        cameraComparison(host:true,onlyHost:true,cpuPercent:250)
+    }
+    func testHostCameraTiming() {cameraComparison(host:true,onlyHost:true)}
+    func testHostCameraComparison() {cameraComparison(host:true)}
+    func testCameraPollingComparison() {cameraComparison(host:false)}
+    private func cameraComparison(host:Bool,onlyHost:Bool=false,cpuPercent:Int=100) {
+        for fast in (onlyHost ? [true]:[false,true]) {
+            let app=XCUIApplication()
+            app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-plot-mode","5","--ui-test-rotation","--ui-test-sharp-text"]
+            app.launchArguments += ["--ui-test-cpu-percent",String(cpuPercent)]
+            if !host || !fast {app.launchArguments.append("--ui-test-intermediate-camera")}
+            if !host && !fast {app.launchArguments.append("--ui-test-30hz-camera")}
+            app.launch()
+            XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:30))
+            let status=app.staticTexts["Engine status"]
+            expectation(for:NSPredicate {_,_ in (status.value as? String ?? "").split(separator:",").count==4},evaluatedWith:status)
+            waitForExpectations(timeout:30)
+            for key in ["DIAMOND","F3"] {tap(app,key)}
+            let overlay=app.otherElements["Sharp text rendering"]
+            expectation(for:NSPredicate {_,_ in (overlay.value as? String ?? "").contains("axisLabels:3")},evaluatedWith:overlay)
+            waitForExpectations(timeout:45)
+            app.buttons["RIGHT"].press(forDuration:0.8)
+            Thread.sleep(forTimeInterval:5)
+            let first=overlay.value as? String ?? ""
+            Thread.sleep(forTimeInterval:5)
+            let last=overlay.value as? String ?? ""
+            print("CAMERA COMPARISON CPU\(cpuPercent) \(host ? (fast ? "host":"intermediate"):(fast ? "fast":"30Hz")) START \(first)")
+            print("CAMERA COMPARISON CPU\(cpuPercent) \(host ? (fast ? "host":"intermediate"):(fast ? "fast":"30Hz")) END \(last)")
+            XCTAssertTrue(pixels(app)?.contains(30)==true)
+            tap(app,"ESC")
+            app.terminate()
+        }
+    }
+
+    func testSustainedMetalRotation() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-plot-mode","5","--ui-test-rotation","--ui-test-sharp-text"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:30))
+        let engineStatus=app.staticTexts["Engine status"]
+        expectation(for:NSPredicate {_,_ in (engineStatus.value as? String ?? "").split(separator:",").count==4},evaluatedWith:engineStatus)
+        waitForExpectations(timeout:30)
+        for key in ["DIAMOND","F3"] {tap(app,key)}
+        let overlay=app.otherElements["Sharp text rendering"]
+        expectation(for:NSPredicate {_,_ in (overlay.value as? String ?? "").contains("axisLabels:3")},evaluatedWith:overlay)
+        waitForExpectations(timeout:45)
+        app.buttons["RIGHT"].press(forDuration:0.8)
+        for i in 0..<10 {
+            Thread.sleep(forTimeInterval:3)
+            print("SUSTAINED \(i): \(overlay.value as? String ?? "missing");engine:\(app.staticTexts["Engine status"].value as? String ?? "missing")")
+            XCTAssertTrue(pixels(app)?.contains(30)==true,"Rotation must not blank the LCD")
+            let a=XCTAttachment(screenshot:app.screenshot());a.name="Sustained rotation \(i)";a.lifetime = .keepAlways;add(a)
+            if i==4 {
+                app.buttons["UP"].press(forDuration:0.8)
+                app.buttons["RIGHT"].press(forDuration:0.8)
+            }
+        }
+        tap(app,"ESC")
+        for key in ["2ND","ON"] {tap(app,key)}
+        expectation(for:NSPredicate {_,_ in self.pixels(app)?.allSatisfy {$0==210} == true},evaluatedWith:app)
+        waitForExpectations(timeout:10)
+        tap(app,"ON")
+        expectation(for:NSPredicate {_,_ in self.pixels(app)?.contains(30)==true},evaluatedWith:app)
+        waitForExpectations(timeout:10)
+    }
+
+    func testSmooth3DRotationAndAxes() {
+        let app=XCUIApplication()
+        app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-hd-plot","--ui-test-plot-mode","5","--ui-test-rotation","--ui-test-sharp-text"]
+        app.launch()
+        XCTAssertTrue(app.images["Calculator display"].waitForExistence(timeout:30))
+        let engineStatus=app.staticTexts["Engine status"]
+        expectation(for:NSPredicate {_,_ in (engineStatus.value as? String ?? "").split(separator:",").count==4},evaluatedWith:engineStatus)
+        waitForExpectations(timeout:30)
+        for key in ["DIAMOND","F3"] {tap(app,key)}
+        let overlay=app.otherElements["Sharp text rendering"]
+        func waitFor(_ value:String) {
+            expectation(for:NSPredicate {_,_ in (overlay.value as? String ?? "").contains(value)},evaluatedWith:overlay)
+            waitForExpectations(timeout:45)
+        }
+        waitFor("axisLabels:3")
+        app.buttons["RIGHT"].coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).press(forDuration:0.8)
+        waitFor("rotation:1")
+        func gpuFrames()->Int {let text=overlay.value as? String ?? "";return Int(text.components(separatedBy:"gpuFrames:").last?.components(separatedBy:";").first ?? "0") ?? 0}
+        func gpuSeconds()->Double {let text=overlay.value as? String ?? "";return Double(text.components(separatedBy:"gpuSeconds:").last?.components(separatedBy:";").first ?? "0") ?? 0}
+        let frameStart=gpuFrames(),timeStart=gpuSeconds()
+        Thread.sleep(forTimeInterval:1)
+        let rendered=gpuFrames()-frameStart
+        let elapsed=gpuSeconds()-timeStart
+        print("3D GPU submission rate: \(Double(rendered)/max(0.001,elapsed)) fps (\(rendered) frames, \(elapsed) seconds)")
+        print("3D display timing: \(overlay.value as? String ?? "missing")")
+        XCTAssertGreaterThan(rendered,0,"GPU rotation must continue after releasing the key")
+        let rotating=XCTAttachment(screenshot:app.screenshot());rotating.name="Smooth HD 3D rotation with axes";rotating.lifetime = .keepAlways;add(rotating)
+        tap(app,"ESC")
+        waitFor("rotation:0")
+        waitFor("axisLabels:3")
+        let nativeBefore=pixels(app)
+        tap(app,"Configuration Settings")
+        let metal=app.switches["Metal 3D Rotation"]
+        for _ in 0..<6 {if metal.isHittable {break};app.swipeUp()}
+        XCTAssertEqual(metal.value as? String,"1")
+        metal.tap();tap(app,"Done")
+        waitFor("axisLabels:0")
+        XCTAssertEqual(nativeBefore,pixels(app),"Renderer toggle must preserve the native calculator display")
+        tap(app,"Configuration Settings")
+        for _ in 0..<6 {if metal.isHittable {break};app.swipeUp()}
+        XCTAssertEqual(metal.value as? String,"0")
+        metal.tap();tap(app,"Done")
+        waitFor("axisLabels:3")
+        for key in ["F1","K9"] {tap(app,key)}
+        XCTAssertTrue((overlay.value as? String ?? "").contains("gpuFrames:"))
+        let format=XCTAttachment(screenshot:app.screenshot());format.name="Graph Formats must stay readable above 3D scene";format.lifetime = .keepAlways;add(format)
+        XCTAssertTrue((overlay.value as? String ?? "").contains("axisLabels:0"),"Metal view must be hidden behind the modal Format window")
+        tap(app,"ESC")
+        waitFor("axisLabels:3")
+    }
+
     func testCatalogHelpPreservesClippedRow() {
         let app=XCUIApplication()
         app.launchArguments=["--ui-test","--reset-settings","--fresh-session","--ui-test-sharp-text","--ui-test-catalog-help"]

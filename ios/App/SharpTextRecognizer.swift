@@ -565,13 +565,14 @@ final class SharpTextRecognizer {
         if index>0 { let b=r.cells[index-1]; if letter(b.glyph.character) && b.x+b.glyph.width==c.x { return true } }
         if index+1<r.cells.count { let a=r.cells[index+1]; if letter(a.glyph.character) && c.x+c.glyph.width==a.x { return true } }; return false
     }
-    func recognize(_ p: [Bool], _ sw: Int=160, _ sh: Int=100) -> [Cell] {
+    func recognize(_ p: [Bool], _ sw: Int=160, _ sh: Int=100, graphChromeOnly:Bool=false) -> [Cell] {
         precondition(p.count==sw*sh)
         blocked=exclusions(p,sw,sh)
         var runs:[Run]=[], singles:[Cell]=[], home=false, graph=false, tools=false, prgm=false
         for f in stride(from:2,through:0,by:-1) {
             let h=[5,8,10][f], gap=[2,6,8][f]
             for y in 0...sh-h {
+                if graphChromeOnly && y+h>16 && y<sh-7 {continue}
                 var line=[Cell?](repeating:nil,count:sw)
                 for x in 0..<sw {
                     var c=match(p,sw,sh,f,x,y)
@@ -631,8 +632,8 @@ final class SharpTextRecognizer {
         }
         return result
     }
-    func stable(_ p: [Bool], _ previous: [Cell], _ sw: Int=160, _ sh: Int=100) -> [Cell] {
-        let fresh=recognize(p,sw,sh); var result:[Cell]=[], occupied=Array(repeating:false,count:p.count)
+    func stable(_ p: [Bool], _ previous: [Cell], _ sw: Int=160, _ sh: Int=100, graphChromeOnly:Bool=false) -> [Cell] {
+        let fresh=recognize(p,sw,sh,graphChromeOnly:graphChromeOnly); var result:[Cell]=[], occupied=Array(repeating:false,count:p.count)
         // A validated toolbar arrow takes priority over cached lookalike fragments.
         for c in fresh where c.glyph.character==Self.dropdown { occupy(c,&occupied,sw); result.append(c) }
         for c in previous {

@@ -116,3 +116,10 @@ int graph89_copy_hd_plot_decorations(float *segments,int capacity){return hdplot
 void graph89_hd_plot_enable(int enabled,int samples){hdplot_enable(enabled,samples);}
 void graph89_graph_cursor_speed(int multiplier){hdplot_cursor_speed(multiplier);}
 int graph89_copy_hd_plot(const uint8_t *screen,float *points,int capacity,uint8_t *background){uint8_t pixels[16000];for(int i=0;i<16000;i++)pixels[i]=screen[i]==30;return hdplot_copy(pixels,points,capacity,background);}
+
+int graph89_copy_mesh(float *v,uint32_t *e,double *m,int previous){return hdplot_copy_mesh(v,e,m,previous);}
+void graph89_smooth_rotation(int on){hdplot_smooth_rotation(on);}
+
+double graph89_rotation_time(void){return hdplot_rotation_time();}
+
+int graph89_copy_camera(double *meta){return hdplot_copy_mesh(NULL,NULL,meta,-1);}
